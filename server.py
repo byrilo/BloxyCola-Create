@@ -18,6 +18,7 @@ Key Improvements in v3.0:
 import sys
 import os
 import json
+import re
 import time
 import hmac
 import gzip
@@ -43,6 +44,13 @@ CLIENT_REV_TTL_SECONDS = 60        # how long a peer counts as "still connected"
 
 # In-memory storage with re-entrant mutex
 lock = threading.RLock()
+PLAYTEST_INVITE_TTL = 2 * 60 * 60
+PLAYTEST_LINK = re.compile(
+    r"https://(?:www\.)?roblox\.com/(?:"
+    r"share\?(?:code=[A-Za-z0-9_-]+&type=Server|type=Server&code=[A-Za-z0-9_-]+)"
+    r"|games/[1-9][0-9]*(?:/[A-Za-z0-9_-]+)?/?\?privateServerLinkCode=[A-Za-z0-9_-]+)"
+)
+
 rooms = {}       # room_id -> { name, owner, revision, objects, tombstones, presence, persistent, closed, members, last_saved, updated_at }
 guests = {}      # token -> { name, deviceKey, last_seen }
 invitations = [] # list of { id, from, nick, room, place, state, recipientOnline, delivered, created_at }
@@ -1063,10 +1071,19 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                             break
                     if idx >= 0:
                         chat_list = chat_list[idx + 1:]
-                self.send_json(200, {
-                    "messages": chat_list,
-                    "total": len(r.get("chat", []))
-                })
+                response = {"messages": chat_list, "total": len(r.get("chat", []))}
+                invitation = r.get("playtest_invite")
+                if invitation and invitation["expires"] <= time.time():
+                    r.pop("playtest_invite")
+                    invitation = None
+                if invitation and (r["owner"] == token or
+                                   guests.get(token, {}).get("name") in r.get("members", ())):
+                    response["playtest"] = {
+                        "url": invitation["url"],
+                        "host": invitation["host"],
+                        "canClear": token in (r["owner"], invitation["token"]),
+                    }
+                self.send_json(200, response)
             return
 
         self.send_json(404, {"error": "Endpoint not found"})
@@ -1444,6 +1461,42 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": err})
             else:
                 self.send_json(200, result)
+            return
+
+        if re.fullmatch(r"/api/rooms/[^/]+/playtest", path):
+            if not self.require_guest(token):
+                return
+            room_id = path.split("/")[3]
+            url = data.get("url")
+            if not isinstance(url, str) or len(url) > 400:
+                self.send_json(400, {"error": "A Roblox private server link is required"})
+                return
+            url = url.strip()
+            if url and not PLAYTEST_LINK.fullmatch(url):
+                self.send_json(400, {"error": "Paste a Roblox private server link"})
+                return
+            with lock:
+                r = rooms.get(room_id)
+                if r is None:
+                    self.send_json(404, {"error": "Room not found"})
+                    return
+                name = guests.get(token, {}).get("name")
+                if r["owner"] != token and name not in r.get("members", ()):
+                    self.send_json(403, {"error": "Join the room before sharing a playtest"})
+                    return
+                invitation = r.get("playtest_invite")
+                if invitation and invitation["expires"] > time.time():
+                    if token not in (r["owner"], invitation["token"]):
+                        self.send_json(403, {"error": "A playtest is already shared in this room"})
+                        return
+                if url:
+                    r["playtest_invite"] = {
+                        "url": url, "host": name, "token": token,
+                        "expires": time.time() + PLAYTEST_INVITE_TTL,
+                    }
+                else:
+                    r.pop("playtest_invite", None)
+                self.send_json(200, {"ok": True})
             return
 
         # 10. Room Chat POST: /api/rooms/<id>/chat

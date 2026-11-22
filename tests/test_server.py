@@ -455,6 +455,35 @@ class TestServerFeatures(ServerTestBase):
         self.assertEqual(get_res["messages"][0]["text"], "Hello Bob!")
         self.assertEqual(get_res["messages"][1]["text"], "Hey Alice!")
 
+    def test_playtest_invite_is_shared_only_with_room_members(self):
+        host = self.register("PlaytestHost")
+        peer = self.register("Playtester")
+        room_id = self.create_room(host)
+        base_path = f"/api/rooms/{room_id}"
+        link = "https://www.roblox.com/share?code=private123&type=Server"
+
+        status, _ = http_json(self.base, base_path + "/playtest", {"url": link}, token=peer)
+        self.assertEqual(status, 403)
+        status, _ = http_json(self.base, base_path + "/playtest",
+                              {"url": "https://roblox.com.evil.example/share?code=123&type=Server"},
+                              token=host)
+        self.assertEqual(status, 400)
+        status, _ = http_json(self.base, base_path + "/playtest", {"url": link}, token=host)
+        self.assertEqual(status, 200)
+        _, summary = http_json(self.base, base_path + "/chat", token=peer)
+        self.assertNotIn("playtest", summary)
+        http_json(self.base, base_path + "/join", {}, token=peer)
+        _, summary = http_json(self.base, base_path + "/chat", token=peer)
+        self.assertEqual(summary["playtest"], {
+            "url": link, "host": "PlaytestHost", "canClear": False,
+        })
+        status, _ = http_json(self.base, base_path + "/playtest", {"url": ""}, token=peer)
+        self.assertEqual(status, 403)
+        status, _ = http_json(self.base, base_path + "/playtest", {"url": ""}, token=host)
+        self.assertEqual(status, 200)
+        _, summary = http_json(self.base, base_path + "/chat", token=peer)
+        self.assertNotIn("playtest", summary)
+
     def test_room_export(self):
         _, g = http_json(self.base, "/api/guest", {"name": "Exporter"})
         _, r = http_json(self.base, "/api/rooms", {"name": "ExportPlace"}, token=g["token"])
