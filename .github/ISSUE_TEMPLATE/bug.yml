@@ -1,0 +1,38 @@
+name: Ошибка в BloxyCola Create
+description: Сообщите о проблеме с подключением, синхронизацией или плейтестом
+title: "[Ошибка]: "
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Версия BloxyCola
+      description: Укажите тег релиза или короткий хеш коммита.
+      placeholder: v0.1.0-beta.1
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Среда и подключение
+      placeholder: Windows 11, версия Studio, LAN или VPN
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как воспроизвести
+      placeholder: Опишите исходное состояние и действия участников по шагам.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Результат
+      placeholder: Что произошло и что вы ожидали увидеть?
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Диагностика и логи
+      description: Добавьте вывод сервера или Studio Output. Удалите пароли, токены и ссылки на приватный сервер.
