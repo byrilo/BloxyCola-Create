@@ -41,7 +41,7 @@ jobs:
           mkdir -p dist
           git archive --format=zip --output=dist/BloxyCola-Create.zip HEAD -- \
             README.md PlaceTogether.rbxmx plugin_source.luau build.py server.py export_room.py \
-            StartPlaceTogetherServer.bat InstallBloxyCola.bat assets tests
+            StartPlaceTogetherServer.bat InstallBloxyCola.bat InstallBloxyCola.ps1 assets tests
 
       - name: Install plugin and start server from ZIP
         run: python tests/smoke_windows_package.py dist/BloxyCola-Create.zip

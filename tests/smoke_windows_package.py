@@ -67,7 +67,12 @@ def verify_package(archive_path):
                     raise RuntimeError(f"{name} must use CRLF line endings.")
             archive.extractall(package)
 
-        environment = dict(os.environ, LOCALAPPDATA=str(root / "AppData"))
+        local_app_data = root / "AppData"
+        studio = local_app_data / "Roblox" / "Versions" / "version-smoke-test"
+        studio.mkdir(parents=True)
+        (studio / "RobloxStudioBeta.exe").touch()
+        environment = dict(os.environ, LOCALAPPDATA=str(local_app_data))
+        environment.pop("ProgramFiles(x86)", None)
         subprocess.run(
             ["cmd.exe", "/d", "/c", "InstallBloxyCola.bat"],
             cwd=package,
@@ -79,6 +84,9 @@ def verify_package(archive_path):
         installed = root / "AppData" / "Roblox" / "Plugins" / "PlaceTogether.rbxmx"
         if installed.read_bytes() != (package / "PlaceTogether.rbxmx").read_bytes():
             raise RuntimeError("The installed plugin differs from the bundled plugin.")
+        audio = "bloxycola-can-opening.mp3"
+        if (studio / "content" / "sounds" / audio).read_bytes() != (package / "assets" / audio).read_bytes():
+            raise RuntimeError("The installed startup sound differs from the bundled audio.")
         verify_server(package, environment)
 
 

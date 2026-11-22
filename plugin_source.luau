@@ -867,7 +867,8 @@ end
 do
 	local sound = Instance.new("Sound")
 	sound.Name = "BloxyColaOpening"
-	sound.SoundId = "rbxassetid://10721950"
+	local localSoundId = "rbxasset://sounds/bloxycola-can-opening.mp3"
+	sound.SoundId = localSoundId
 	sound.Volume = 0.45
 	sound.Parent = widget
 
@@ -878,6 +879,10 @@ do
 		task.spawn(function()
 			local content = game:GetService("ContentProvider")
 			local ok, err = pcall(content.PreloadAsync, content, {sound})
+			if (not ok or not sound.IsLoaded) and sound.SoundId == localSoundId and widget.Enabled and not inPlaytest() then
+				sound.SoundId = "rbxassetid://10721950"
+				ok, err = pcall(content.PreloadAsync, content, {sound})
+			end
 			loading = false
 			if not widget.Enabled or inPlaytest() then return end
 			if not ok or not sound.IsLoaded then
