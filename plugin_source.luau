@@ -473,6 +473,9 @@ do
 	local undoCard = card(homePanel, "PersonalUndoCard")
 	title("Undo", undoCard)
 	undoControls.button = makeButton("Undo my change", undoCard, "primary", 36)
+	undoControls.message = textLabel("", 18, undoCard)
+	undoControls.message.TextWrapped = true
+	undoControls.message.Visible = false
 	undoControls.help = makeButton("How to set Ctrl+Z", undoCard)
 	undoControls.instructions = textLabel("File → Customize Shortcuts → BloxyCola: Undo my change. If Ctrl+Z is assigned to Undo, move the built-in shortcut first.", 90, undoCard)
 	undoControls.instructions.TextWrapped = true
@@ -850,7 +853,7 @@ local function refreshUI(isActive, isLoggedIn, hasInbox, isBusy)
 		end
 	end
 
-	for _, b in ipairs({invite, yes, no, connect, retry, accept, logout, hostStartBtn, quickSaveBtn, dropPingBtn, chatSendBtn, createSnapBtn, undoControls.button, roomCode.join}) do
+	for _, b in ipairs({invite, yes, no, connect, retry, accept, logout, hostStartBtn, quickSaveBtn, dropPingBtn, chatSendBtn, createSnapBtn, roomCode.join}) do
 		b.Active = not isBusy
 		b.AutoButtonColor = not isBusy
 		b.TextTransparency = isBusy and 0.45 or 0
@@ -1733,7 +1736,8 @@ end
 local function index()
 	diagnostics.lastSync, diagnostics.requestMs, diagnostics.queue = nil, nil, nil
 	diagnostics.sync.Text = "Waiting for first sync"
-	table.clear(undoControls.history)
+	undoControls.history = {}
+	undoControls.message.Visible = false
 	clearWatchers()
 	currentRevision = 0
 	objects = {}
@@ -2476,48 +2480,81 @@ local function sendChanges(current)
 	return latest
 end
 
-function undoControls.undo()
-	if not active then
-		status("Connect to a room to undo your changes.")
-		return
-	end
-	if busy or restoringRemoteHistory or inPlaytest() then
-		status("Finish the current operation before undoing.")
-		return
-	end
-
-	busy = true
-	local ok, message = pcall(function()
+function undoControls.applyLatest()
+	local history = undoControls.history
+	local target
+	local skipped = false
+	for _ = 1, 3 do
 		sendChanges(snapshot(false))
 		local current = snapshot(false)
-		if #changes(current) > 0 then return "Changes are still syncing. Try Undo again." end
-
-		local batch = undoControls.history[#undoControls.history]
-		if not batch then return "No synced changes to undo in this room." end
-		local inverse = undoControls.plan(batch, current)
-		if #inverse == 0 then
-			table.remove(undoControls.history)
-			return "Nothing to undo. Newer edits were preserved."
+		if target and history[#history] ~= target then
+			return "Another local edit arrived while undo was syncing. Select Undo again."
 		end
+		if #changes(current) == 0 then
+			local inverse
+			while #history > 0 do
+				target = history[#history]
+				inverse = undoControls.plan(target, current)
+				if #inverse > 0 then break end
+				table.remove(history)
+				target = nil
+				skipped = true
+			end
+			if not target then
+				return skipped and "Your saved edits were already replaced." or "No changes from this window to undo in this room."
+			end
 
-		local result = request("POST", {changes = inverse, since = currentRevision, requireCurrentRevision = true})
-		if result.conflict then return "A teammate just edited these objects. Try Undo again." end
-
-		table.remove(undoControls.history)
-		local records = result.remoteChanges or {}
-		for _, change in ipairs(inverse) do
-			records[change.id] = {value = change.value, version = result.revision}
+			local result = request("POST", {changes = inverse, since = currentRevision, requireCurrentRevision = true})
+			if not result.conflict then
+				table.remove(history)
+				local records = result.remoteChanges or {}
+				for _, change in ipairs(inverse) do
+					records[change.id] = {value = change.value, version = result.revision}
+				end
+				snapshot(false)
+				apply(records, current, false)
+				currentRevision = result.revision
+				lastKnownObjectCount = result.objectsCount or lastKnownObjectCount
+				lastSaveTimestamp = result.lastSaved or lastSaveTimestamp
+				updateSessionStatsUI()
+				return "Undid your last synced change batch."
+			end
 		end
-		snapshot(false)
-		apply(records, current, false)
-		currentRevision = result.revision
-		lastKnownObjectCount = result.objectsCount or lastKnownObjectCount
-		lastSaveTimestamp = result.lastSaved or lastSaveTimestamp
-		updateSessionStatsUI()
-		return "Undid your last synced change batch."
-	end)
-	busy = false
-	status(ok and message or ("Undo failed: "..tostring(message)))
+	end
+	return "The room is still syncing. Select Undo again after it catches up."
+end
+
+function undoControls.undo()
+	if undoControls.requested then return end
+	undoControls.message.Visible = true
+	if not active then
+		undoControls.message.Text = "Connect to a room to undo your changes."
+		return
+	end
+	if inPlaytest() then
+		undoControls.message.Text = "Stop the playtest before undoing."
+		return
+	end
+
+	undoControls.requested = true
+	local history = undoControls.history
+	undoControls.message.Text = "Waiting for synchronization..."
+	local deadline = os.clock() + 10
+	while busy or restoringRemoteHistory do
+		task.wait(0.05)
+		if not active or history ~= undoControls.history or inPlaytest() or os.clock() >= deadline then break end
+	end
+	if active and history == undoControls.history then
+		if busy or restoringRemoteHistory or inPlaytest() then
+			undoControls.message.Text = "Undo is waiting for Studio. Select Undo again after the current operation."
+		else
+			busy = true
+			local ok, message = pcall(undoControls.applyLatest)
+			busy = false
+			undoControls.message.Text = ok and message or ("Undo failed: "..tostring(message))
+		end
+	end
+	undoControls.requested = false
 end
 
 undoControls.button.Activated:Connect(undoControls.undo)
