@@ -1,19 +1,11 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal DisableDelayedExpansion
 chcp 65001 >nul 2>&1
 set "PYTHONIOENCODING=utf-8"
-title PlaceTogether 3.0 Server Launcher
-
-rem ============================================================
-rem  PlaceTogether 3.0 - Universal Server Launcher
-rem  - Uses Python + server.py if available, or falls back to PlaceTogetherServer.exe
-rem  - Automatic firewall rule setup (when run as Admin)
-rem  - Works with Radmin VPN, Hamachi, ZeroTier, LAN, ngrok, Porthole
-rem ============================================================
+title BloxyCola Create Server
 
 set "PORT=8787"
 set "SRV=%~dp0server.py"
-set "EXE=%~dp0PlaceTogetherServer.exe"
 set "DATA=%~dp0data.json"
 
 rem --- Optional server password ---------------------------------
@@ -21,12 +13,7 @@ rem   StartPlaceTogetherServer.bat mypassword
 rem   or set PT_SECRET in the environment before running.
 rem   Every client must then enter the same password in the plugin
 rem   Settings tab (SERVER PASSWORD field).
-set "SECRET_ARGS="
-if not "%~1"=="" (
-    set "SECRET_ARGS=--secret "%~1""
-) else if defined PT_SECRET (
-    set "SECRET_ARGS=--secret "%PT_SECRET%""
-)
+if not "%~1"=="" set "PT_SECRET=%~1"
 
 rem --- Find Python: PATH, py launcher, portable folder --------
 set "PY_CMD="
@@ -40,27 +27,16 @@ if not defined PY_CMD (
 )
 
 if not defined PY_CMD if exist "%~dp0python_embed\python.exe" (
-    set "PY_CMD=%~dp0python_embed\python.exe"
+    set PY_CMD="%~dp0python_embed\python.exe"
 )
 
-rem --- Check if we have either Python+server.py or PlaceTogetherServer.exe ---
-set "RUN_MODE="
-if defined PY_CMD if exist "%SRV%" (
-    set "RUN_MODE=PYTHON"
+if not defined PY_CMD (
+    echo [ERROR] Install Python 3 and add it to PATH.
+    pause
+    exit /b 1
 )
-if not defined RUN_MODE if exist "%EXE%" (
-    set "RUN_MODE=EXE"
-)
-
-if not defined RUN_MODE (
-    echo.
-    echo   ====================================================
-    echo    [ERROR] Neither Python+server.py nor PlaceTogetherServer.exe found!
-    echo   ====================================================
-    echo.
-    echo   Place server.py or PlaceTogetherServer.exe in:
-    echo     %~dp0
-    echo.
+if not exist "%SRV%" (
+    echo [ERROR] server.py must be next to this launcher.
     pause
     exit /b 1
 )
@@ -79,34 +55,26 @@ for /f "usebackq tokens=* delims=" %%a in (`powershell -NoProfile -Command "try 
 
 for /f "usebackq tokens=* delims=" %%a in (`powershell -NoProfile -Command "try { (Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object { $_.InterfaceAlias -match 'Ethernet|Wi-Fi|Беспроводная|Сеть' -and $_.IPAddress -notmatch '^127\.' -and $_.IPAddress -notmatch '^169\.254\.' } | Select-Object -First 1).IPAddress } catch { '' }" 2^>nul`) do set "LAN_IP=%%a"
 
-rem --- Try to open firewall port (optional, needs admin) ------
-set "FWOK=0"
-powershell -NoProfile -Command "try { if (-not (Get-NetFirewallRule -DisplayName 'PlaceTogether %PORT%' -ErrorAction SilentlyContinue)) { New-NetFirewallRule -DisplayName 'PlaceTogether %PORT%' -Direction Inbound -Action Allow -Protocol TCP -LocalPort %PORT% -Profile Any -ErrorAction Stop | Out-Null }; exit 0 } catch { exit 1 }" >nul 2>&1 && set "FWOK=1"
-
 echo.
 echo   ============================================================
-echo     PlaceTogether 3.0 Server - Ultra-Fast Co-op Engine
+echo     BloxyCola Create Server
 echo   ============================================================
 echo.
-if "%RUN_MODE%"=="PYTHON" (
-    echo   Runtime      : !PY_CMD! ^("%SRV%"^)
-) else (
-    echo   Runtime      : Standalone EXE ^("%EXE%"^)
-)
+echo   Runtime      : %PY_CMD% ^("%SRV%"^)
 echo   Port         : %PORT%
 echo   Data Storage : %DATA%
 echo   Backups Dir  : %~dp0backups
-if defined SECRET_ARGS (
+if defined PT_SECRET (
     echo   Password     : enabled
 ) else (
     echo   Password     : OFF - anyone on this network can edit your place
 )
 echo.
 
-if defined RADMIN_IP   echo   [Radmin VPN]  : http://!RADMIN_IP!:%PORT%
-if defined HAMACHI_IP  echo   [Hamachi]     : http://!HAMACHI_IP!:%PORT%
-if defined ZEROTIER_IP echo   [ZeroTier]    : http://!ZEROTIER_IP!:%PORT%
-if defined LAN_IP      echo   [LAN / Wi-Fi] : http://!LAN_IP!:%PORT%
+if defined RADMIN_IP   echo   [Radmin VPN]  : http://%RADMIN_IP%:%PORT%
+if defined HAMACHI_IP  echo   [Hamachi]     : http://%HAMACHI_IP%:%PORT%
+if defined ZEROTIER_IP echo   [ZeroTier]    : http://%ZEROTIER_IP%:%PORT%
+if defined LAN_IP      echo   [LAN / Wi-Fi] : http://%LAN_IP%:%PORT%
 echo   [Localhost]   : http://127.0.0.1:%PORT%
 echo.
 echo   ------------------------------------------------------------
@@ -118,20 +86,11 @@ echo   - Same PC / Host    : http://127.0.0.1:%PORT%
 echo   ------------------------------------------------------------
 echo.
 
-if "%FWOK%"=="0" (
-    echo   [i] Firewall rule was NOT created automatically.
-    echo       If friends cannot connect, run this .bat as Administrator once.
-    echo.
-)
-
-echo   Server is running. Auto-save & backups enabled. Press Ctrl+C to stop.
+echo   Allow Python through Windows Firewall on your private network if prompted.
+echo   Press Ctrl+C to stop the server.
 echo.
 
-if "%RUN_MODE%"=="PYTHON" (
-    !PY_CMD! "%SRV%" --port %PORT% --data "%DATA%" %SECRET_ARGS%
-) else (
-    "%EXE%" --port %PORT% --data "%DATA%" %SECRET_ARGS%
-)
+%PY_CMD% "%SRV%" --port %PORT% --data "%DATA%"
 set "EXITCODE=%errorlevel%"
 
 echo.
@@ -145,4 +104,4 @@ if not "%EXITCODE%"=="0" (
     echo.
 )
 pause
-endlocal
+endlocal & exit /b %EXITCODE%
