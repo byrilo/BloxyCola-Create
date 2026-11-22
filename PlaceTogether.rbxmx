@@ -4,13 +4,7 @@
 	<Item class="Script" referent="RBXBB3C8BCE355E44D3ABE8F155BAB255D4">
 		<Properties>
 			<ProtectedString name="Source"><![CDATA[-- PlaceTogether 3.0: Ultra-Smooth Real-Time Collaborative Building in Roblox Studio
--- Fork Improvements:
--- 1. Event-Driven Dirty Tracking Engine (O(1) incremental snapshots instead of full DataModel scans)
--- 2. 60 FPS Smooth CFrame Interpolation & Live Drag Streaming via Presence
--- 3. Fixed Terrain Infinite Voxel Rescan Bug & Ctrl+D Duplicate ID Collisions
--- 4. Full Toolbox Descendant Editing Support & Depth-Sorted Hierarchy Creation
--- 5. Integrated Save Manager, Server Room Browser & 1-Click Backup/Restore Time Machine
-
+local History = game:GetService("ChangeHistoryService")
 local Http = game:GetService("HttpService")
 local Editor = game:GetService("ScriptEditorService")
 local Run = game:GetService("RunService")
@@ -641,8 +635,7 @@ do
 	credSub.TextColor3 = palette.subtle
 end
 
-local presenceToggle = makeButton("Peer Cursors & Live Drag: On")
-local smoothToggle = makeButton("Smooth 60FPS Part Lerp: On")
+local presenceToggle = makeButton("Peer Cursors: On")
 local logout = makeButton("Reconnect to Server")
 
 -- FOOTER
@@ -693,9 +686,29 @@ local active = false
 local busy = false
 local restoreSuppressed = false
 local applyingRemote = false
-local smoothLerpEnabled = plugin:GetSetting("PTSmoothLerp") ~= false
+local remoteHistoryName = "PlaceTogether.RemoteSync"
+local restoringRemoteHistory = false
+
+History.OnUndo:Connect(function(waypoint)
+	if not active or waypoint ~= remoteHistoryName then return end
+	restoringRemoteHistory = true
+	task.defer(function()
+		local canRedo, nextWaypoint = History:GetCanRedo()
+		if canRedo and nextWaypoint == remoteHistoryName then
+			applyingRemote = true
+			local ok, err = pcall(History.Redo, History)
+			applyingRemote = false
+			if not ok then
+				warn(err)
+				return
+			end
+		end
+		restoringRemoteHistory = false
+	end)
+end)
 
 local objects = {}         -- key -> Instance
+local restoredIds = setmetatable({}, {__mode = "k"})
 local ids = {}             -- Instance -> key
 local baseline = {}        -- key -> last synced captured record
 local cachedSnapshot = {}  -- key -> latest local captured record
@@ -720,7 +733,6 @@ local appearanceRetry = {}
 local warnings = {}
 
 -- Smooth 60FPS CFrame interpolation state for remote moving objects
-local smoothTargets = {} -- key -> { obj = Instance, targetCF = CFrame, isModel = boolean, updatedAt = number }
 
 local function status(s)
 	setNotice(s)
@@ -796,16 +808,6 @@ end
 
 button.Click:Connect(function()
 	widget.Enabled = not widget.Enabled
-end)
-
-smoothToggle.Text = smoothLerpEnabled and "Smooth 60FPS Part Lerp: On" or "Smooth 60FPS Part Lerp: Off"
-smoothToggle.MouseButton1Click:Connect(function()
-	smoothLerpEnabled = not smoothLerpEnabled
-	plugin:SetSetting("PTSmoothLerp", smoothLerpEnabled)
-	smoothToggle.Text = smoothLerpEnabled and "Smooth 60FPS Part Lerp: On" or "Smooth 60FPS Part Lerp: Off"
-	if not smoothLerpEnabled then
-		smoothTargets = {}
-	end
 end)
 
 local function equal(a, b)
@@ -1566,7 +1568,7 @@ end
 local function registerNewObject(obj)
 	if not eligible(obj) then return end
 	if not ids[obj] then
-		local existingAttr = obj:GetAttribute("PT_ObjectId")
+		local existingAttr = restoredIds[obj] or obj:GetAttribute("PT_ObjectId")
 		local key
 		-- Fix Ctrl+D / Copy-Paste collision: if another live instance already owns existingAttr, generate a fresh GUID!
 		if type(existingAttr) == "string" and #existingAttr > 0 and #existingAttr <= 512 and (not objects[existingAttr] or objects[existingAttr] == obj) then
@@ -1650,6 +1652,7 @@ local function index()
 	clearWatchers()
 	currentRevision = 0
 	objects = {}
+	restoredIds = setmetatable({}, {__mode = "k"})
 	ids = {}
 	baseline = {}
 	cachedSnapshot = {}
@@ -1662,7 +1665,6 @@ local function index()
 	referenceRetry = {}
 	appearanceRetry = {}
 	warnings = {}
-	smoothTargets = {}
 	terrainReset()
 
 	local function walk(parent, parentId)
@@ -1778,9 +1780,9 @@ local function snapshot(forceFull)
 						for _, c in ipairs(objConnections[obj]) do pcall(function() c:Disconnect() end) end
 						objConnections[obj] = nil
 					end
+					restoredIds[obj] = key
 					ids[obj] = nil
 					objects[key] = nil
-					smoothTargets[key] = nil
 				end
 			end
 		end
@@ -1788,53 +1790,6 @@ local function snapshot(forceFull)
 
 	terrainRecords()
 	return cachedSnapshot
-end
-
-local function isLocallyDragging(obj)
-	if not obj then return false end
-	local mouseDown = false
-	pcall(function()
-		mouseDown = UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
-	end)
-	if not mouseDown then return false end
-	for _, sel in ipairs(Selection:Get()) do
-		if sel == obj or obj:IsDescendantOf(sel) then
-			return true
-		end
-	end
-	return false
-end
-
-local function queueSmoothTransform(key, obj, targetCF, isModel, immediate)
-	if immediate or not smoothLerpEnabled then
-		smoothTargets[key] = nil
-		if isModel then
-			obj:PivotTo(targetCF)
-		else
-			obj.CFrame = targetCF
-		end
-		return
-	end
-	if isLocallyDragging(obj) then
-		return
-	end
-	local currentCF = isModel and obj:GetPivot() or obj.CFrame
-	local dist = (currentCF.Position - targetCF.Position).Magnitude
-	if dist > 80 then
-		smoothTargets[key] = nil
-		if isModel then
-			obj:PivotTo(targetCF)
-		else
-			obj.CFrame = targetCF
-		end
-	elseif dist > 0.001 or not currentCF.Rotation:FuzzyEq(targetCF.Rotation, 0.0005) then
-		smoothTargets[key] = {
-			obj = obj,
-			targetCF = targetCF,
-			isModel = isModel,
-			updatedAt = os.clock(),
-		}
-	end
 end
 
 local function request(method, payload, renewed)
@@ -1953,7 +1908,7 @@ local function applyScriptSourceWithCursorPreservation(obj, key, newSource)
 	dirtyKeys[key] = nil
 end
 
-local function apply(remote, sent, force)
+local function applyRemoteRecords(remote, force)
 	local changed = {}
 	for key, record in pairs(remote) do
 		if force or versions[key] ~= record.version or pending[key] or meshRetry[key] or referenceRetry[key] or (appearanceRetry[key] and appearanceRetry[key] <= os.clock()) then
@@ -2082,7 +2037,6 @@ local function apply(remote, sent, force)
 		local obj = objects[key]
 		if not v then
 			appearanceRetry[key] = nil
-			smoothTargets[key] = nil
 		end
 		if v and obj and not pending[key] then
 			referenceRetry[key] = nil
@@ -2120,12 +2074,12 @@ local function apply(remote, sent, force)
 					elseif obj:IsA("Model") and (name == "CFrame" or name == "WorldPivot") then
 						local cf = decode(value)
 						if typeof(cf) == "CFrame" then
-							queueSmoothTransform(key, obj, cf, true, force)
+							obj:PivotTo(cf)
 						end
 					elseif obj:IsA("BasePart") and name == "CFrame" then
 						local cf = decode(value)
 						if typeof(cf) == "CFrame" then
-							queueSmoothTransform(key, obj, cf, false, force)
+							obj.CFrame = cf
 						end
 					elseif not equal(encode(obj[name]), value) then
 						obj[name] = decode(value)
@@ -2170,7 +2124,7 @@ local function apply(remote, sent, force)
 				for _, c in ipairs(objConnections[obj]) do pcall(function() c:Disconnect() end) end
 				objConnections[obj] = nil
 			end
-			local ok = pcall(function() obj:Destroy() end)
+			local ok = pcall(function() obj.Parent = nil end)
 			if ok then
 				ids[obj] = nil
 				objects[key] = nil
@@ -2179,7 +2133,6 @@ local function apply(remote, sent, force)
 				pending[key] = nil
 				meshRetry[key] = nil
 				referenceRetry[key] = nil
-				smoothTargets[key] = nil
 			else
 				warn(key..":delete", obj.Name..": Roblox prevented deletion")
 			end
@@ -2207,14 +2160,6 @@ local function apply(remote, sent, force)
 			if obj and isValidInHierarchy(obj, key) then
 				local ok, cap = pcall(capture, obj, key)
 				if ok then
-					-- If CFrame/WorldPivot is currently being smoothly interpolated, record target CFrame in baseline/cache so we don't echo intermediate lerp states back to server!
-					if smoothTargets[key] and cap.props then
-						if smoothTargets[key].isModel then
-							cap.props.WorldPivot = encode(smoothTargets[key].targetCF)
-						else
-							cap.props.CFrame = encode(smoothTargets[key].targetCF)
-						end
-					end
 					cachedSnapshot[key] = cap
 					baseline[key] = acknowledged(r.value, r.value, cap)
 				else
@@ -2226,6 +2171,15 @@ local function apply(remote, sent, force)
 		dirtyKeys[key] = nil
 	end
 	applyingRemote = false
+end
+
+local function apply(remote, _, force)
+	local recording = History:TryBeginRecording(remoteHistoryName)
+	if not recording then error("Waiting for Studio to finish the current edit") end
+	local ok, err = pcall(applyRemoteRecords, remote, force)
+	applyingRemote = false
+	History:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
+	if not ok then error(err) end
 end
 
 local function blocked(obj, key)
@@ -2272,12 +2226,12 @@ local function updateSessionStatsUI()
 end
 
 local function sendChanges(current)
+	if restoringRemoteHistory then error("Waiting for Studio to restore a synchronized edit") end
 	local list = changes(current)
 	if #list > 0 then
 		local result = request("POST", {changes = list, since = currentRevision})
 		if not result.conflict then
 			warnings.syncConflict = nil
-			currentRevision = result.revision
 			lastKnownObjectCount = result.objectsCount or lastKnownObjectCount
 			lastSaveTimestamp = result.lastSaved or lastSaveTimestamp
 
@@ -2285,16 +2239,17 @@ local function sendChanges(current)
 				if ch.deleted then
 					baseline[ch.id] = nil
 					cachedSnapshot[ch.id] = nil
-					versions[ch.id] = currentRevision
+					versions[ch.id] = result.revision
 				else
 					baseline[ch.id] = copy(ch.value)
-					versions[ch.id] = currentRevision
+					versions[ch.id] = result.revision
 				end
 			end
 
 			if result.remoteChanges and next(result.remoteChanges) then
 				apply(result.remoteChanges, current, false)
 			end
+			currentRevision = result.revision
 			updateSessionStatsUI()
 			return {revision = currentRevision, objects = {}}
 		end
@@ -2309,13 +2264,13 @@ local function sendChanges(current)
 		return {revision = currentRevision, objects = {}}
 	end
 
-	currentRevision = latest.revision
 	if latest.delta then
 		apply(latest.objects, current, false)
 	else
 		apply(latest.objects, current, true)
 	end
 
+	currentRevision = latest.revision
 	warnings.syncConflict = nil
 	updateSessionStatsUI()
 	return latest
@@ -2418,7 +2373,6 @@ local function connectSession()
 		restoreSuppressed = true
 		active = false
 		clearWatchers()
-		smoothTargets = {}
 		connect.Text = "Reconnect to Session"
 		status("Session saved & disconnected. Safe to close local place.")
 		return
@@ -4125,20 +4079,6 @@ do
 					end
 				end
 			end
-			-- Apply live drag transforms from peer at 60 FPS!
-			if smoothLerpEnabled and type(peer.transforms) == "table" then
-				for key, comps in pairs(peer.transforms) do
-					local obj = objects[key]
-					if obj and type(comps) == "table" and #comps == 12 then
-						local cf = CFrame.new(table.unpack(comps))
-						if obj:IsA("Model") then
-							queueSmoothTransform(key, obj, cf, true, false)
-						elseif obj:IsA("BasePart") then
-							queueSmoothTransform(key, obj, cf, false, false)
-						end
-					end
-				end
-			end
 		end
 		for id, item in pairs(markers) do
 			if not present[id] then
@@ -4259,21 +4199,10 @@ do
 		local position = camera.CFrame.Position
 		local look = camera.CFrame.LookVector
 		local selected = {}
-		local transforms = {}
-		local tCount = 0
 		for _, obj in ipairs(Selection:Get()) do
 			local key = ids[obj]
 			if key and obj:IsDescendantOf(workspace) and (obj:IsA("BasePart") or obj:IsA("Model")) then
 				table.insert(selected, key)
-				if tCount < 16 then
-					local ok, cf = pcall(function()
-						return obj:IsA("Model") and obj:GetPivot() or obj.CFrame
-					end)
-					if ok and cf then
-						transforms[key] = {cf:GetComponents()}
-						tCount += 1
-					end
-				end
 				if #selected >= 32 then break end
 			end
 		end
@@ -4305,65 +4234,29 @@ do
 			position = {position.X, position.Y, position.Z},
 			look = {look.X, look.Y, look.Z},
 			selected = selected,
-			transforms = transforms,
 			teamTest = teamTestData,
 			activeScript = currentActiveScriptInfo,
 			ping = pingPayload,
 		}
 	end
 
-	presenceToggle.Text = enabled and "Peer Cursors & Live Drag: On" or "Peer Cursors & Live Drag: Off"
+	presenceToggle.Text = enabled and "Peer Cursors: On" or "Peer Cursors: Off"
 	local toggleConnection = presenceToggle.MouseButton1Click:Connect(function()
 		enabled = not enabled
 		plugin:SetSetting("PTShowParticipants", enabled)
-		presenceToggle.Text = enabled and "Peer Cursors & Live Drag: On" or "Peer Cursors & Live Drag: Off"
+		presenceToggle.Text = enabled and "Peer Cursors: On" or "Peer Cursors: Off"
 		if not enabled then clear() end
 	end)
 
 	local renderConnection = Run.RenderStepped:Connect(function(dt)
 		if not active or Run:IsRunning() then
 			if folder then clear() end
-			smoothTargets = {}
 			if TT.active then TT.stop() end
 			return
 		end
 
 		if TT.active then
 			TT.updateLocal(dt)
-		end
-
-		-- 1. 60 FPS Smooth Object Transform Interpolation
-		if smoothLerpEnabled and next(smoothTargets) then
-			applyingRemote = true
-			local objBlend = 1 - math.exp(-22 * math.min(dt, 0.1))
-			local now = os.clock()
-			for key, item in pairs(smoothTargets) do
-				local obj = item.obj
-				if not obj or not obj.Parent or isLocallyDragging(obj) then
-					smoothTargets[key] = nil
-				else
-					local ok, curCF = pcall(function()
-						return item.isModel and obj:GetPivot() or obj.CFrame
-					end)
-					if not ok or not curCF then
-						smoothTargets[key] = nil
-					else
-						local dist = (curCF.Position - item.targetCF.Position).Magnitude
-						if dist < 0.002 and curCF.Rotation:FuzzyEq(item.targetCF.Rotation, 0.0005) or (now - item.updatedAt > 0.5) then
-							pcall(function()
-								if item.isModel then obj:PivotTo(item.targetCF) else obj.CFrame = item.targetCF end
-							end)
-							smoothTargets[key] = nil
-						else
-							local nextCF = curCF:Lerp(item.targetCF, objBlend)
-							pcall(function()
-								if item.isModel then obj:PivotTo(nextCF) else obj.CFrame = nextCF end
-							end)
-						end
-					end
-				end
-			end
-			applyingRemote = false
 		end
 
 		-- 2. 60 FPS Peer Camera / Avatar Interpolation
