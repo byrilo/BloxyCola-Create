@@ -1223,6 +1223,15 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                 if len(changes) > 20000:
                     self.send_json(413, {"error": "Слишком много изменений за один запрос"})
                     return
+                if any(
+                    not isinstance(change, dict)
+                    or not isinstance(change.get("id"), str)
+                    or not change["id"]
+                    or (not change.get("deleted") and not isinstance(change.get("value"), dict))
+                    for change in changes
+                ):
+                    self.send_json(400, {"error": "Each change requires an object id and a value or deletion"})
+                    return
                 try:
                     since_rev = int(data.get("since", 0))
                 except (TypeError, ValueError):
@@ -1249,9 +1258,7 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                 tombstones = r.setdefault("tombstones", {})
 
                 for ch in changes:
-                    obj_id = ch.get("id")
-                    if not obj_id:
-                        continue
+                    obj_id = ch["id"]
                     if ch.get("deleted"):
                         if obj_id in r["objects"] or obj_id not in tombstones:
                             r["objects"].pop(obj_id, None)

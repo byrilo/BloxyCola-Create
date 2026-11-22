@@ -256,6 +256,21 @@ class TestSyncProtocol(ServerTestBase):
         self.assertEqual(latest["objects"]["part"]["value"], part)
         self.assertEqual(latest["objects"]["child"]["value"], child)
 
+    def test_sync_rejects_invalid_record_without_partially_applying_batch(self):
+        value = {"class": "Part", "props": {"Name": "Valid"}}
+        _, initial = self.get_sync(self.token, self.room)
+
+        for invalid in (None, {"id": []}, {"id": "invalid", "value": "bad"}):
+            with self.subTest(invalid=invalid):
+                status, _ = self.sync(
+                    self.token, self.room, [{"id": "part", "value": value}, invalid],
+                    since=initial["revision"],
+                )
+                self.assertEqual(status, 400)
+                _, state = self.get_sync(self.token, self.room)
+                self.assertEqual(state["revision"], initial["revision"])
+                self.assertNotIn("part", state["objects"])
+
     def test_sync_rejects_malformed_changes(self):
         status, body = http_json(
             self.base,
