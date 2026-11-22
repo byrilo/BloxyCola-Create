@@ -32,6 +32,15 @@ jobs:
             README.md PlaceTogether.rbxmx plugin_source.luau build.py server.py export_room.py \
             StartPlaceTogetherServer.bat InstallBloxyCola.bat assets tests
           python -m zipfile -t dist/BloxyCola-Create.zip
+          python - <<'PY'
+          from zipfile import ZipFile
+
+          with ZipFile("dist/BloxyCola-Create.zip") as archive:
+              for name in ("StartPlaceTogetherServer.bat", "InstallBloxyCola.bat"):
+                  contents = archive.read(name)
+                  if b"\n" in contents.replace(b"\r\n", b""):
+                      raise SystemExit(f"{name} must use CRLF line endings in the ZIP")
+          PY
 
       - name: Upload Windows ZIP
         if: github.event_name != 'pull_request' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))

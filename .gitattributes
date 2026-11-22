@@ -3,3 +3,4 @@
 *.rbxmx text
 *.luau text
 *.py text
+*.bat text eol=crlf
