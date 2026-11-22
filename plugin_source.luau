@@ -2524,15 +2524,21 @@ local function saveRoomNow(customLabel)
 		status("Connect to a room first before saving.")
 		return
 	end
+	if busy or inPlaytest() then
+		status("Finish the current operation before saving.")
+		return
+	end
+	busy = true
 	local ok, res = pcall(function()
-		local current = snapshot(false)
-		sendChanges(current)
+		sendChanges(snapshot(false))
+		if #changes(snapshot(false)) > 0 then error("Room edits are still syncing. Try again.") end
 		return api("/rooms/"..room.Text.."/save", "POST", {
 			name = sessionTitle.Text,
 			label = customLabel or "manual",
 			snapshot = true
 		})
 	end)
+	busy = false
 	if ok and res then
 		lastSaveTimestamp = res.lastSaved or os.time()
 		lastKnownObjectCount = res.objectsCount or lastKnownObjectCount
