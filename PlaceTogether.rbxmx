@@ -1518,8 +1518,8 @@ end
 
 local function eligible(obj)
 	if obj == script or obj == workspace.CurrentCamera or obj:IsA("Terrain") then return false end
-	if obj.Name == "PlaceTogetherTeamTest" or obj:IsDescendantOf(workspace:FindFirstChild("PlaceTogetherTeamTest")) then return false end
-	return true
+	local preview = workspace:FindFirstChild("PlaceTogetherTeamTest")
+	return not preview or (obj ~= preview and not obj:IsDescendantOf(preview))
 end
 
 local function capture(obj, key)
@@ -2770,7 +2770,9 @@ local function openHost()
 	local saved = storage:GetAttribute("PT_SavedRoom")
 	if type(saved) == "string" and saved:match("^[a-f0-9]+$") and storage:GetAttribute("PT_SavedServer") == base() then
 		local accessible, info = pcall(function() return api("/rooms/"..saved.."/state") end)
-		if accessible and not info.closed then
+		-- A room created by an older plugin may contain only service records.
+		-- Use a new room so the empty snapshot cannot replace the local map.
+		if accessible and not info.closed and (info.objectsCount or 0) > #roots then
 			room.Text = saved
 			sessionTitle.Text = info.name
 			connectSession()
