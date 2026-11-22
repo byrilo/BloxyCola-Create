@@ -230,6 +230,24 @@ class TestSyncProtocol(ServerTestBase):
         self.assertEqual(latest["revision"], updated["revision"])
         self.assertEqual(latest["objects"]["part"]["value"], newer)
 
+    def test_undo_rejects_a_plan_made_before_another_object_was_added(self):
+        part = {"class": "Part", "parent": "@Workspace"}
+        _, initial = self.sync(self.token, self.room, [{"id": "part", "value": part}])
+        peer = self.register("UndoPeer")
+        child = {"class": "Attachment", "parent": "part"}
+        _, updated = self.sync(peer, self.room, [{"id": "child", "value": child}],
+                               since=initial["revision"])
+        payload = {"changes": [{"id": "part", "deleted": True}],
+                   "since": initial["revision"], "requireCurrentRevision": True}
+
+        status, _ = http_json(self.base, f"/api/rooms/{self.room}/sync",
+                              payload, token=self.token)
+        self.assertEqual(status, 409)
+        _, latest = self.get_sync(self.token, self.room)
+        self.assertEqual(latest["revision"], updated["revision"])
+        self.assertEqual(latest["objects"]["part"]["value"], part)
+        self.assertEqual(latest["objects"]["child"]["value"], child)
+
     def test_sync_rejects_malformed_changes(self):
         status, body = http_json(
             self.base,
