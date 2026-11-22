@@ -459,6 +459,17 @@ do
 	toggleTeamTestBtn = makeButton("Start movement preview", teamTestCard, "primary", 36)
 end
 
+local undoControls = {}
+do
+	local undoCard = card(homePanel, "PersonalUndoCard")
+	title("Undo", undoCard)
+	undoControls.button = makeButton("Undo my change", undoCard, "primary", 36)
+	undoControls.help = makeButton("How to set Ctrl+Z", undoCard)
+	undoControls.instructions = textLabel("File → Customize Shortcuts → BloxyCola: Undo my change. If Ctrl+Z is assigned to Undo, move the built-in shortcut first.", 90, undoCard)
+	undoControls.instructions.TextWrapped = true
+	undoControls.instructions.Visible = false
+end
+
 local hostStartBtn = makeButton("Start Hosting Current Place", homePanel, "primary", 36)
 
 local nick
@@ -808,7 +819,7 @@ local function refreshUI(isActive, isLoggedIn, hasInbox, isBusy)
 		end
 	end
 
-	for _, b in ipairs({invite, yes, no, connect, retry, accept, logout, hostStartBtn, quickSaveBtn, dropPingBtn, chatSendBtn, createSnapBtn}) do
+	for _, b in ipairs({invite, yes, no, connect, retry, accept, logout, hostStartBtn, quickSaveBtn, dropPingBtn, chatSendBtn, createSnapBtn, undoControls.button}) do
 		b.Active = not isBusy
 		b.AutoButtonColor = not isBusy
 		b.TextTransparency = isBusy and 0.45 or 0
@@ -1660,6 +1671,7 @@ local function setupRootWatchers()
 end
 
 local function index()
+	table.clear(undoControls.history)
 	clearWatchers()
 	currentRevision = 0
 	objects = {}
@@ -2244,6 +2256,98 @@ local function updateSessionStatsUI()
 	sessionStats.Text = string.format("Rev %d · %d objects · %s", currentRevision, count, savedStr)
 end
 
+-- PERSONAL UNDO START
+undoControls.history = {}
+undoControls.limit = 24
+
+function undoControls.restoreFields(before, after, current)
+	local restored = copy(current)
+	for key, value in pairs(after) do
+		if equal(current[key], value) then restored[key] = copy(before[key]) end
+	end
+	for key, value in pairs(before) do
+		if after[key] == nil and current[key] == nil then restored[key] = copy(value) end
+	end
+	return restored
+end
+
+function undoControls.inverse(entry, current)
+	local before, after = entry.before, entry.after
+	if not before or not after or not current then
+		if equal(current, after) then return copy(before) end
+		return current
+	end
+
+	local restored = undoControls.restoreFields(before, after, current)
+	for _, field in ipairs({"props", "attributes"}) do
+		if before[field] and after[field] and current[field] then
+			restored[field] = undoControls.restoreFields(before[field], after[field], current[field])
+		end
+	end
+	return restored
+end
+
+function undoControls.plan(batch, current)
+	local proposed = {}
+	for id, entry in pairs(batch) do
+		local original = current[id]
+		local restored = undoControls.inverse(entry, original)
+		if not equal(original, restored) then
+			proposed[id] = {id = id, value = restored, deleted = restored == nil}
+		end
+	end
+
+	-- Keep newer children and object references from being broken by an undo.
+	local function keep(id)
+		if proposed[id] and proposed[id].deleted then
+			proposed[id] = nil
+			return true
+		end
+		return false
+	end
+	local again
+	repeat
+		again = false
+		local function check(record)
+			if not record then return end
+			if record.parent then again = keep(record.parent) or again end
+			for _, value in pairs(record.props or {}) do
+				if type(value) == "table" and value.t == "Instance" and value.v then
+					again = keep(value.v) or again
+				end
+			end
+		end
+		for id, record in pairs(current) do
+			local change = proposed[id]
+			if change then check(change.value) else check(record) end
+		end
+		for id, change in pairs(proposed) do
+			if not current[id] then check(change.value) end
+		end
+		for id, change in pairs(proposed) do
+			local parent = change.value and change.value.parent
+			local visited = {[id] = true}
+			while parent and parent ~= "@game" do
+				local parentChange = proposed[parent]
+				local parentRecord = current[parent]
+				if parentChange then parentRecord = parentChange.value end
+				if visited[parent] or not parentRecord then
+					proposed[id] = nil
+					again = true
+					break
+				end
+				visited[parent] = true
+				parent = parentRecord.parent
+			end
+		end
+	until not again
+
+	local list = {}
+	for _, change in pairs(proposed) do table.insert(list, change) end
+	return list
+end
+-- PERSONAL UNDO END
+
 local function sendChanges(current)
 	if restoringRemoteHistory then error("Waiting for Studio to restore a synchronized edit") end
 	local list = changes(current)
@@ -2254,7 +2358,11 @@ local function sendChanges(current)
 			lastKnownObjectCount = result.objectsCount or lastKnownObjectCount
 			lastSaveTimestamp = result.lastSaved or lastSaveTimestamp
 
+			local batch = {}
 			for _, ch in ipairs(list) do
+				if active and ch.id:sub(1, 9) ~= "~Terrain/" then
+					batch[ch.id] = {before = copy(baseline[ch.id]), after = copy(ch.value)}
+				end
 				if ch.deleted then
 					baseline[ch.id] = nil
 					cachedSnapshot[ch.id] = nil
@@ -2263,6 +2371,11 @@ local function sendChanges(current)
 					baseline[ch.id] = copy(ch.value)
 					versions[ch.id] = result.revision
 				end
+			end
+
+			if next(batch) then
+				table.insert(undoControls.history, batch)
+				if #undoControls.history > undoControls.limit then table.remove(undoControls.history, 1) end
 			end
 
 			if result.remoteChanges and next(result.remoteChanges) then
@@ -2296,6 +2409,57 @@ local function sendChanges(current)
 	updateSessionStatsUI()
 	return latest
 end
+
+function undoControls.undo()
+	if not active then
+		status("Connect to a room to undo your changes.")
+		return
+	end
+	if busy or restoringRemoteHistory or inPlaytest() then
+		status("Finish the current operation before undoing.")
+		return
+	end
+
+	busy = true
+	local ok, message = pcall(function()
+		sendChanges(snapshot(false))
+		local current = snapshot(false)
+		if #changes(current) > 0 then return "Changes are still syncing. Try Undo again." end
+
+		local batch = undoControls.history[#undoControls.history]
+		if not batch then return "No synced changes to undo in this room." end
+		local inverse = undoControls.plan(batch, current)
+		if #inverse == 0 then
+			table.remove(undoControls.history)
+			return "Nothing to undo. Newer edits were preserved."
+		end
+
+		local result = request("POST", {changes = inverse, since = currentRevision, requireCurrentRevision = true})
+		if result.conflict then return "A teammate just edited these objects. Try Undo again." end
+
+		table.remove(undoControls.history)
+		local records = result.remoteChanges or {}
+		for _, change in ipairs(inverse) do
+			records[change.id] = {value = change.value, version = result.revision}
+		end
+		snapshot(false)
+		apply(records, current, false)
+		currentRevision = result.revision
+		lastKnownObjectCount = result.objectsCount or lastKnownObjectCount
+		lastSaveTimestamp = result.lastSaved or lastSaveTimestamp
+		updateSessionStatsUI()
+		return "Undid your last synced change batch."
+	end)
+	busy = false
+	status(ok and message or ("Undo failed: "..tostring(message)))
+end
+
+undoControls.button.Activated:Connect(undoControls.undo)
+undoControls.help.Activated:Connect(function()
+	undoControls.instructions.Visible = not undoControls.instructions.Visible
+end)
+plugin:CreatePluginAction("BloxyColaUndoMyChange", "BloxyCola: Undo my change",
+	"Undo your latest synced change batch", "", true).Triggered:Connect(undoControls.undo)
 
 -- ============================================================
 -- SESSION & NETWORK MANAGEMENT
