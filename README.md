@@ -4,7 +4,7 @@
 
 **Своя комната для совместной работы в Roblox Studio.** Редактируйте карту и скрипты через собственный сервер, затем приглашайте команду на плейтест.
 
-[Скачать тестовую сборку](https://github.com/byrilo/BloxyCola-Create/releases/download/v0.1.0-beta.1/BloxyCola-Create-v0.1.0-beta.1.zip) · [Релизы](https://github.com/byrilo/BloxyCola-Create/releases) · [Сообщить об ошибке](https://github.com/byrilo/BloxyCola-Create/issues/new?template=bug.yml)
+[Скачать свежую сборку](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml?query=branch%3Amain+is%3Asuccess) · [Релизы](https://github.com/byrilo/BloxyCola-Create/releases) · [Сообщить об ошибке](https://github.com/byrilo/BloxyCola-Create/issues/new?template=bug.yml)
 
 [![Тесты сервера](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml)
 
@@ -14,7 +14,7 @@
 
 Для Windows понадобятся Roblox Studio и Python 3.
 
-1. Распакуйте архив. В Roblox Studio откройте **Plugins → Plugins Folder**, скопируйте туда `PlaceTogether.rbxmx` и перезапустите Studio. Разрешите плагину HTTP-запросы и запись скриптов, когда Studio попросит.
+1. Откройте последний успешный запуск по ссылке выше и скачайте **BloxyCola-Create-windows** из **Artifacts**. Распакуйте архивы и дважды нажмите `InstallBloxyCola.bat`. Он установит плагин и звук запуска. Откройте или перезапустите Roblox Studio. Разрешите плагину HTTP-запросы и запись скриптов, когда Studio попросит.
 2. Запустите сервер из папки архива. Аргумент в примере задаёт пароль комнаты. Замените его своим.
 
    ```powershell
@@ -52,11 +52,7 @@ flowchart LR
 
 ## Звук запуска
 
-Установите звук перед запуском Studio. После обновления Studio повторите команду.
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\InstallStartupSound.ps1
-```
+Звук устанавливается вместе с плагином. Если после обновления Studio он пропал, снова дважды нажмите `InstallBloxyCola.bat` и перезапустите Studio.
 
 ## Сборка и тесты
 

@@ -30,7 +30,7 @@ jobs:
           mkdir -p dist
           git archive --format=zip --output=dist/BloxyCola-Create.zip HEAD -- \
             README.md PlaceTogether.rbxmx plugin_source.luau build.py server.py export_room.py \
-            StartPlaceTogetherServer.bat InstallStartupSound.ps1 assets tests
+            StartPlaceTogetherServer.bat InstallBloxyCola.bat InstallStartupSound.ps1 assets tests
           python -m zipfile -t dist/BloxyCola-Create.zip
 
       - name: Upload Windows ZIP
