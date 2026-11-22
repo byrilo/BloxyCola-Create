@@ -365,6 +365,7 @@ local sessionStats
 local diagnostics = {}
 local participantsText
 local quickSaveBtn
+local saveFeedback
 local dropPingBtn
 local connect
 
@@ -400,6 +401,9 @@ do
 	participantsText.TextSize = 11
 
 	quickSaveBtn = makeButton("Save & Create Backup Now", sessionCard, "success", 34)
+	saveFeedback = textLabel("", 18, sessionCard)
+	saveFeedback.TextWrapped = true
+	saveFeedback.Visible = false
 	dropPingBtn = makeButton("📍 Drop 3D Beacon (Look Here!)", sessionCard, "primary", 34)
 	connect = makeButton("Leave Session", sessionCard, "danger", 34)
 	connect.Visible = false
@@ -1741,6 +1745,7 @@ end
 local function index()
 	diagnostics.lastSync, diagnostics.requestMs, diagnostics.queue = nil, nil, nil
 	diagnostics.sync.Text = "Waiting for first sync"
+	saveFeedback.Visible = false
 	undoControls.history = {}
 	undoControls.message.Visible = false
 	clearWatchers()
@@ -2657,39 +2662,70 @@ local function api(path, method, payload, renewed)
 	return data
 end
 
+local saveRequested = false
 local function saveRoomNow(customLabel)
 	if not active or room.Text == "" then
 		status("Connect to a room first before saving.")
 		return
 	end
-	if busy or inPlaytest() then
-		status("Finish the current operation before saving.")
+	if saveRequested then return end
+	if inPlaytest() then
+		status("Stop the playtest before saving.")
 		return
 	end
+
+	saveRequested = true
+	saveFeedback.Visible = true
+	saveFeedback.Text = "Waiting for synchronization..."
+	local history = undoControls.history
+	local roomId, server = room.Text, base()
+	local deadline = os.clock() + 10
+	while busy and active and history == undoControls.history and os.clock() < deadline do
+		task.wait(0.05)
+	end
+	if not active or history ~= undoControls.history or room.Text ~= roomId or base() ~= server then
+		saveRequested = false
+		return
+	end
+	if busy or inPlaytest() then
+		saveRequested = false
+		saveFeedback.Text = "Finish the current operation before saving."
+		status(saveFeedback.Text)
+		return
+	end
+
 	busy = true
+	saveFeedback.Text = "Saving backup..."
 	local ok, res = pcall(function()
 		sendChanges(snapshot(false))
 		if #changes(snapshot(false)) > 0 then error("Room edits are still syncing. Try again.") end
-		return api("/rooms/"..room.Text.."/save", "POST", {
+		return api("/rooms/"..roomId.."/save", "POST", {
 			name = sessionTitle.Text,
 			label = customLabel or "manual",
 			snapshot = true
 		})
 	end)
 	busy = false
-	if ok and res then
+	saveRequested = false
+
+	local message
+	if ok and res and res.saved == true and type(res.backup) == "table" and res.backup.id then
 		lastSaveTimestamp = res.lastSaved or os.time()
 		lastKnownObjectCount = res.objectsCount or lastKnownObjectCount
 		updateSessionStatsUI()
 		local storage = game:GetService("ReplicatedStorage")
 		pcall(function()
-			storage:SetAttribute("PT_SavedRoom", room.Text)
-			storage:SetAttribute("PT_SavedServer", base())
+			storage:SetAttribute("PT_SavedRoom", roomId)
+			storage:SetAttribute("PT_SavedServer", server)
 		end)
-		status("Saved room & backup snapshot! (Rev "..tostring(res.revision)..", "..tostring(res.objectsCount).." objects)")
+		message = "Saved room & backup snapshot! (Rev "..tostring(res.revision)..", "..tostring(res.objectsCount).." objects)"
+	elseif ok then
+		message = "The server could not confirm the save and backup. Check its console."
 	else
-		status("Save failed: "..tostring(res))
+		message = "Save failed: "..tostring(res)
 	end
+	saveFeedback.Text = message
+	status(message)
 end
 
 quickSaveBtn.MouseButton1Click:Connect(function()
@@ -3570,6 +3606,7 @@ task.spawn(function()
 		task.wait(0.15 + backoff)
 		if active and not busy and not inPlaytest() then
 			busy = true
+			diagnostics.backgroundSync = true
 			local ok, err = pcall(function()
 				local current = snapshot(false)
 				local state = sendChanges(current)
@@ -3580,6 +3617,7 @@ task.spawn(function()
 					.. warningText()
 				)
 			end)
+			diagnostics.backgroundSync = false
 			busy = false
 			if ok then
 				backoff = 0
@@ -3658,7 +3696,7 @@ end)
 
 task.spawn(function()
 	while true do
-		refreshUI(active, loggedIn, inbox ~= nil, busy or inviting)
+		refreshUI(active, loggedIn, inbox ~= nil, (busy and not diagnostics.backgroundSync) or inviting)
 		task.wait(0.2)
 	end
 end)
@@ -4180,7 +4218,7 @@ toggleTeamTestBtn.MouseButton1Click:Connect(TT.toggle)
 teamTestToolbarBtn.Click:Connect(function()
 	uiTab = "home"
 	widget.Enabled = true
-	refreshUI(active, loggedIn, inbox ~= nil, busy)
+	refreshUI(active, loggedIn, inbox ~= nil, (busy and not diagnostics.backgroundSync) or inviting)
 end)
 
 function playtestCard.preparePlace()
