@@ -443,13 +443,23 @@ local toggleTeamTestBtn
 local playtestCard
 do
 	local teamTestCard = card(homePanel, "TeamTestCard")
+	title("Playtest with friends", teamTestCard)
 	playtestCard = {
-		localTest = makeButton("Test with 2 local players", teamTestCard, "primary", 36),
-		prepare = makeButton("Sync place for shared Team Test", teamTestCard, "success", 36),
+		prepare = makeButton("Sync place before publishing", teamTestCard),
+		submit = field("Paste Roblox private server link", "", teamTestCard),
 	}
-	local instructions = textLabel("Shared: publish this copy to a private Roblox experience, give teammates Edit access, then open the same place and choose Team Test in Studio.", 66, teamTestCard)
+	playtestCard.share = makeButton("Share playtest invite", teamTestCard, "primary")
+	playtestCard.invitationLabel = textLabel("", 20, teamTestCard)
+	playtestCard.invitation = field("", "", teamTestCard)
+	playtestCard.invitation.TextEditable = false
+	playtestCard.clear = makeButton("Remove playtest invite", teamTestCard)
+	playtestCard.invitationLabel.Visible = false
+	playtestCard.invitation.Visible = false
+	playtestCard.clear.Visible = false
+	local instructions = textLabel("Publish a test copy in Roblox. Share its private server link here, then copy the link into a browser to join.", 66, teamTestCard)
 	instructions.TextWrapped = true
 	instructions.TextColor3 = palette.muted
+
 	title("Edit-mode movement preview", teamTestCard)
 
 	ttActiveUsersLabel = textLabel("No active testers in room.", 18, teamTestCard)
@@ -3223,12 +3233,50 @@ end)
 
 refreshSavesBtn.MouseButton1Click:Connect(refreshSavesAndBackupsUI)
 
+function playtestCard.showInvitation(invitation)
+	local url = type(invitation) == "table" and invitation.url or nil
+	playtestCard.invitationLabel.Visible = url ~= nil
+	playtestCard.invitation.Visible = url ~= nil
+	playtestCard.clear.Visible = url ~= nil and invitation.canClear == true
+	playtestCard.invitationLabel.Text = url and ("Playtest from "..invitation.host.." · Copy the link") or ""
+	if playtestCard.invitation.Text ~= (url or "") then
+		playtestCard.invitation.Text = url or ""
+	end
+end
+
+function playtestCard.updateInvitation(url)
+	if not active or not loggedIn or room.Text == "" then
+		status("Connect to a room to share a playtest.")
+		return
+	end
+	local ok, err = pcall(api, "/rooms/"..room.Text.."/playtest", "POST", {url = url})
+	if ok then
+		playtestCard.submit.Text = ""
+		status(url == "" and "Playtest invite removed." or "Playtest invite shared with this room.")
+	else
+		status("Playtest invite: "..tostring(err))
+	end
+end
+
+playtestCard.share.Activated:Connect(function()
+	local url = playtestCard.submit.Text:match("^%s*(.-)%s*$")
+	if url ~= "" then
+		playtestCard.updateInvitation(url)
+	else
+		status("Paste the Roblox private server link first.")
+	end
+end)
+playtestCard.clear.Activated:Connect(function() playtestCard.updateInvitation("") end)
+
 -- Chat background polling loop
 task.spawn(function()
 	while true do
 		if active and loggedIn and not inPlaytest() and room.Text ~= "" then
 			pcall(function()
-				local res = api("/rooms/"..room.Text.."/chat"..(lastChatId ~= "" and ("?since="..lastChatId) or ""), "GET")
+				local roomId, server = room.Text, base()
+				local res = api("/rooms/"..roomId.."/chat"..(lastChatId ~= "" and ("?since="..lastChatId) or ""), "GET")
+				if not active or room.Text ~= roomId or base() ~= server then return end
+				playtestCard.showInvitation(res.playtest)
 				if res and res.messages then
 					for _, msg in ipairs(res.messages) do
 						lastChatId = msg.id
@@ -3236,6 +3284,8 @@ task.spawn(function()
 					end
 				end
 			end)
+		else
+			playtestCard.showInvitation(nil)
 		end
 		task.wait(0.6)
 	end
@@ -3950,6 +4000,7 @@ function playtestCard.preparePlace()
 	busy = true
 	local ok, err = pcall(function()
 		sendChanges(snapshot(false))
+		if #changes(snapshot(false)) > 0 then error("Room edits are still syncing. Try again.") end
 	end)
 	busy = false
 	if not ok then
@@ -3960,22 +4011,7 @@ end
 
 playtestCard.prepare.Activated:Connect(function()
 	if playtestCard.preparePlace() then
-		status("Publish this copy to your shared test place, then choose Team Test in Studio.")
-	end
-end)
-
-playtestCard.localTest.Activated:Connect(function()
-	if not playtestCard.preparePlace() then return end
-	busy = true
-	status("Starting a Roblox server with two local clients...")
-	local ok, err = pcall(function()
-		game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync(2)
-	end)
-	busy = false
-	if ok then
-		status("Local playtest ended.")
-	else
-		status("Could not start local playtest: "..tostring(err))
+		status("Publish this copy to your Roblox test place, then share its private server link.")
 	end
 end)
 
