@@ -2,11 +2,13 @@
 
 # BloxyCola Create
 
-Совместное редактирование карт и скриптов в Roblox Studio через свой сервер.
+**Своя комната для совместной работы в Roblox Studio.** Редактируйте карту и скрипты через собственный сервер, затем приглашайте команду на плейтест.
 
-[Скачать тестовую сборку](https://github.com/byrilo/BloxyCola-Create/releases/download/v0.1.0-beta.1/BloxyCola-Create-v0.1.0-beta.1.zip) · [Что вошло в релиз](https://github.com/byrilo/BloxyCola-Create/releases/tag/v0.1.0-beta.1)
+[Скачать тестовую сборку](https://github.com/byrilo/BloxyCola-Create/releases/download/v0.1.0-beta.1/BloxyCola-Create-v0.1.0-beta.1.zip) · [Релизы](https://github.com/byrilo/BloxyCola-Create/releases) · [Сообщить об ошибке](https://github.com/byrilo/BloxyCola-Create/issues/new?template=bug.yml)
 
 [![Тесты сервера](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml)
+
+[Установка](#быстрый-старт) · [Плейтест](#плейтест-с-друзьями) · [Ctrl+Z](#отмена-своих-правок) · [Подключение](#проверка-подключения)
 
 ## Быстрый старт
 
@@ -20,7 +22,7 @@
    ```
 
 3. В **Settings** укажите адрес и пароль сервера. Для хоста адрес — `http://127.0.0.1:8787`. Остальные участники используют адрес хоста в общей сети или VPN.
-4. На вкладке **Together** нажмите **Start Hosting Current Place** и пригласите участников через **Invite Peer**. Приглашённый открывает пустой Baseplate и принимает приглашение. Чат и курсоры участников доступны в комнате, а резервные копии — в **Saves & Rooms**.
+4. На вкладке **Together** нажмите **Start Hosting Current Place** и пригласите участников через **Invite Peer**. Приглашённый открывает пустой Baseplate и принимает приглашение. Вместо приглашения по нику можно скопировать **Room code** у хоста. Напарник вставляет его в **Join by room code**. Чат и курсоры доступны в комнате, резервные копии — в **Saves & Rooms**.
 
 ## Плейтест с друзьями
 
@@ -44,6 +46,10 @@ flowchart LR
 
 Чтобы использовать **Ctrl+Z**, откройте **File → Customize Shortcuts** и назначьте сочетание команде **BloxyCola: Undo my change**. Если оно занято штатным **Undo**, переназначьте его в том же окне. Подсказка также есть в панели плагина.
 
+## Проверка подключения
+
+В **Settings → Check server connection** можно проверить адрес, пароль и время ответа сервера. В комнате отображаются время с последней синхронизации, длительность HTTP-запроса и количество изменений из последней группы, ожидающих отправки.
+
 ## Звук запуска
 
 Установите звук перед запуском Studio. После обновления Studio повторите команду.
@@ -60,5 +66,7 @@ powershell -ExecutionPolicy Bypass -File .\InstallStartupSound.ps1
 python build.py
 python -m unittest discover -s tests
 ```
+
+После успешного CI для `main` и тегов `v*` Windows-архив доступен в **Artifacts** на странице запуска. [GitHub Actions](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml)
 
 Основа проекта — [Place Together Remake](https://github.com/NeDollManB/Place-Together-Remake).
