@@ -16,6 +16,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -119,6 +120,13 @@ class TestAuth(ServerTestBase):
         self.assertEqual(status, 200)
         self.assertEqual(body["status"], "online")
         self.assertFalse(body["auth_required"])
+
+    def test_guest_tokens_are_distinct_within_one_clock_tick(self):
+        with mock.patch.object(server, "time", wraps=server.time) as clock:
+            clock.time.return_value = 1_800_000_000.0
+            first = self.register("SameTickOne")
+            second = self.register("SameTickTwo")
+        self.assertNotEqual(first, second)
 
     def test_room_list_requires_registration(self):
         status, body = http_json(self.base, "/api/rooms")

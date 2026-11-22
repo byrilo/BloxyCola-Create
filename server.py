@@ -19,6 +19,7 @@ import sys
 import os
 import json
 import re
+import secrets
 import time
 import hmac
 import gzip
@@ -1113,7 +1114,7 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "Invalid deviceKey"})
                 return
             with lock:
-                guest_token = device_key if device_key else (token or f"token_{int(time.time()*1000)}")
+                guest_token = device_key or token or secrets.token_urlsafe(32)
                 now = time.time()
                 final_name = name
                 rename_explicit = bool(data.get("rename", False))
