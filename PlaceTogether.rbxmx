@@ -8,6 +8,14 @@ local History = game:GetService("ChangeHistoryService")
 local Http = game:GetService("HttpService")
 local Editor = game:GetService("ScriptEditorService")
 local Run = game:GetService("RunService")
+
+local function inPlaytest()
+	if Run:IsRunning() then return true end
+	local ok, editModeActive = pcall(function()
+		return game:GetService("StudioTestService").EditModeActive
+	end)
+	return ok and not editModeActive
+end
 local Selection = game:GetService("Selection")
 local UserInputService = game:GetService("UserInputService")
 local Collection = game:GetService("CollectionService")
@@ -48,7 +56,7 @@ end
 
 local toolbar = plugin:CreateToolbar("PlaceTogether")
 local button = toolbar:CreateButton("PlaceTogether", "Collaborative Building v3.0", "")
-local teamTestToolbarBtn = toolbar:CreateButton("TeamTest", "Toggle Co-op Team Test", "")
+local teamTestToolbarBtn = toolbar:CreateButton("TeamTest", "Show Roblox playtest options", "")
 local widget = plugin:CreateDockWidgetPluginGuiAsync(
 	"PlaceTogetherInvites03",
 	DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 360, 580, 300, 420)
@@ -428,26 +436,26 @@ do
 	scActiveLabel.TextColor3 = palette.subtle
 end
 
--- CO-OP TEAM TEST UI CARD
+-- Roblox runtime testing and the optional edit-mode preview.
 local ttActiveUsersLabel
 local toggleTeamTestBtn
+local playtestCard
 do
 	local teamTestCard = card(homePanel, "TeamTestCard")
-	local ttBadge = textLabel("CO-OP TEAM TEST (PLAYTEST MODE)", 14, teamTestCard)
-	ttBadge.Font = Enum.Font.GothamBold
-	ttBadge.TextSize = 9
-	ttBadge.TextColor3 = palette.green
-
-	local ttTitle = title("Multiplayer Playtest in Studio", teamTestCard)
-	local ttDesc = textLabel("Spawn avatars, run, jump, check parkour & collisions with friends directly in Roblox Studio without uploading to Roblox!", 28, teamTestCard)
-	ttDesc.TextSize = 11
-	ttDesc.TextColor3 = palette.muted
+	playtestCard = {
+		localTest = makeButton("Test with 2 local players", teamTestCard, "primary", 36),
+		prepare = makeButton("Sync place for shared Team Test", teamTestCard, "success", 36),
+	}
+	local instructions = textLabel("Shared: publish this copy to a private Roblox experience, give teammates Edit access, then open the same place and choose Team Test in Studio.", 66, teamTestCard)
+	instructions.TextWrapped = true
+	instructions.TextColor3 = palette.muted
+	title("Edit-mode movement preview", teamTestCard)
 
 	ttActiveUsersLabel = textLabel("No active testers in room.", 18, teamTestCard)
 	ttActiveUsersLabel.TextSize = 11
 	ttActiveUsersLabel.TextColor3 = palette.subtle
 
-	toggleTeamTestBtn = makeButton("▶ Start Team Test", teamTestCard, "primary", 36)
+	toggleTeamTestBtn = makeButton("Start movement preview", teamTestCard, "primary", 36)
 end
 
 local hostStartBtn = makeButton("Start Hosting Current Place", homePanel, "primary", 36)
@@ -2355,7 +2363,7 @@ end)
 local function connectSession()
 	if busy then return end
 	if active then
-		if Run:IsRunning() then
+		if inPlaytest() then
 			status("Stop Play mode before leaving session.")
 			return
 		end
@@ -2378,7 +2386,7 @@ local function connectSession()
 		return
 	end
 
-	if Run:IsRunning() then
+	if inPlaytest() then
 		status("Stop Play/Test mode before connecting.")
 		return
 	end
@@ -3041,7 +3049,7 @@ refreshSavesBtn.MouseButton1Click:Connect(refreshSavesAndBackupsUI)
 -- Chat background polling loop
 task.spawn(function()
 	while true do
-		if active and loggedIn and not Run:IsRunning() and room.Text ~= "" then
+		if active and loggedIn and not inPlaytest() and room.Text ~= "" then
 			pcall(function()
 				local res = api("/rooms/"..room.Text.."/chat"..(lastChatId ~= "" and ("?since="..lastChatId) or ""), "GET")
 				if res and res.messages then
@@ -3143,7 +3151,7 @@ task.spawn(function()
 	local backoff = 0
 	while true do
 		task.wait(0.15 + backoff)
-		if active and not busy and not Run:IsRunning() then
+		if active and not busy and not inPlaytest() then
 			busy = true
 			local ok, err = pcall(function()
 				local current = snapshot(false)
@@ -3162,14 +3170,14 @@ task.spawn(function()
 				backoff = math.min(backoff > 0 and backoff * 2 or 0.5, 5)
 				status("Sync retrying automatically: "..tostring(err))
 			end
-		elseif active and Run:IsRunning() then
+		elseif active and inPlaytest() then
 			status("Sync paused during Play mode. Stop game to resume editing.")
 		end
 	end
 end)
 
 plugin.Unloading:Connect(function()
-	if active and not busy and not Run:IsRunning() then
+	if active and not busy and not inPlaytest() then
 		busy = true
 		pcall(function()
 			local current = snapshot(false)
@@ -3527,7 +3535,7 @@ function TT.stop()
 		workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
 	end)
 
-	toggleTeamTestBtn.Text = "▶ Start Team Test"
+	toggleTeamTestBtn.Text = "Start movement preview"
 	toggleTeamTestBtn.TextColor3 = palette.ink
 	toggleTeamTestBtn.BackgroundColor3 = palette.accent
 	status("Team Test ended. Back in Studio edit mode.")
@@ -3736,10 +3744,10 @@ function TT.start()
 	TT.hudGui = gui
 	TT.active = true
 
-	toggleTeamTestBtn.Text = "⏹ Exit Team Test"
+	toggleTeamTestBtn.Text = "Exit movement preview"
 	toggleTeamTestBtn.TextColor3 = Color3.fromRGB(252, 165, 165)
 	toggleTeamTestBtn.BackgroundColor3 = palette.dangerBg
-	status("Team Test active! Run, jump and test your game with peers.")
+	status("Movement preview active.")
 end
 
 function TT.toggle()
@@ -3751,7 +3759,48 @@ function TT.toggle()
 end
 
 toggleTeamTestBtn.MouseButton1Click:Connect(TT.toggle)
-teamTestToolbarBtn.Click:Connect(TT.toggle)
+teamTestToolbarBtn.Click:Connect(function()
+	uiTab = "home"
+	widget.Enabled = true
+	refreshUI(active, loggedIn, inbox ~= nil, busy)
+end)
+
+function playtestCard.preparePlace()
+	if busy or inPlaytest() then return false end
+	if TT.active then TT.stop() end
+	if not active then return true end
+
+	busy = true
+	local ok, err = pcall(function()
+		sendChanges(snapshot(false))
+	end)
+	busy = false
+	if not ok then
+		status("Playtest sync failed: "..tostring(err))
+	end
+	return ok
+end
+
+playtestCard.prepare.Activated:Connect(function()
+	if playtestCard.preparePlace() then
+		status("Publish this copy to your shared test place, then choose Team Test in Studio.")
+	end
+end)
+
+playtestCard.localTest.Activated:Connect(function()
+	if not playtestCard.preparePlace() then return end
+	busy = true
+	status("Starting a Roblox server with two local clients...")
+	local ok, err = pcall(function()
+		game:GetService("StudioTestService"):ExecuteMultiplayerTestAsync(2)
+	end)
+	busy = false
+	if ok then
+		status("Local playtest ended.")
+	else
+		status("Could not start local playtest: "..tostring(err))
+	end
+end)
 
 UserInputService.InputBegan:Connect(function(input, processed)
 	if not TT.active then return end
@@ -4179,15 +4228,15 @@ do
 		end
 
 		if TT.active then
-			toggleTeamTestBtn.Text = "⏹ Exit Team Test"
+			toggleTeamTestBtn.Text = "Exit movement preview"
 			toggleTeamTestBtn.TextColor3 = Color3.fromRGB(252, 165, 165)
 			toggleTeamTestBtn.BackgroundColor3 = palette.dangerBg
 		elseif #testers > 0 then
-			toggleTeamTestBtn.Text = "▶ Join Team Test (" .. testers[1] .. " is testing!)"
+			toggleTeamTestBtn.Text = "Join movement preview (" .. testers[1] .. " is testing!)"
 			toggleTeamTestBtn.TextColor3 = Color3.fromRGB(187, 247, 208)
 			toggleTeamTestBtn.BackgroundColor3 = palette.greenBg
 		else
-			toggleTeamTestBtn.Text = "▶ Start Team Test"
+			toggleTeamTestBtn.Text = "Start movement preview"
 			toggleTeamTestBtn.TextColor3 = palette.ink
 			toggleTeamTestBtn.BackgroundColor3 = palette.accent
 		end
@@ -4249,7 +4298,7 @@ do
 	end)
 
 	local renderConnection = Run.RenderStepped:Connect(function(dt)
-		if not active or Run:IsRunning() then
+		if not active or inPlaytest() then
 			if folder then clear() end
 			if TT.active then TT.stop() end
 			return
@@ -4399,7 +4448,7 @@ do
 	-- Fast 0.15s (~6.6 Hz) Presence & Live Drag stream loop
 	task.spawn(function()
 		while alive do
-			if active and loggedIn and not Run:IsRunning() then
+			if active and loggedIn and not inPlaytest() then
 				local currentRoom = room.Text
 				local currentBase = base()
 				if previousRoom ~= currentRoom or previousBase ~= currentBase then
@@ -4414,7 +4463,7 @@ do
 						return api("/rooms/"..currentRoom.."/presence", "POST", payload)
 					end)
 					sending = false
-					if alive and active and not Run:IsRunning() and currentRoom == room.Text and currentBase == base() then
+					if alive and active and not inPlaytest() and currentRoom == room.Text and currentBase == base() then
 						if ok then
 							local rendered, reason = pcall(function() receive(peers) end)
 							if not rendered then
