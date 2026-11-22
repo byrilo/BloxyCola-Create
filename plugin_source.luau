@@ -1554,8 +1554,10 @@ local function watchObject(obj, key)
 	local conns = {}
 	table.insert(conns, obj.Changed:Connect(function(prop)
 		if applyingRemote then return end
-		if prop ~= "Parent" then
-			markObjectAndAncestorsDirty(obj)
+		markObjectAndAncestorsDirty(obj)
+		if prop == "Parent" then
+			local previous = cachedSnapshot[key]
+			if previous then markObjectAndAncestorsDirty(objects[previous.parent]) end
 		end
 	end))
 	table.insert(conns, obj.AttributeChanged:Connect(function(attr)
@@ -1911,13 +1913,21 @@ local function applyScriptSourceWithCursorPreservation(obj, key, newSource)
 	dirtyKeys[key] = nil
 end
 
+local function mergeRoomRecord(key, remoteValue)
+	local previous = baseline[key]
+	local current = cachedSnapshot[key]
+	if previous and not current then return copy(remoteValue) end
+	return merge(previous, current, remoteValue)
+end
+
 local function applyRemoteRecords(remote, force)
 	local changed = {}
 	for key, record in pairs(remote) do
 		if force or versions[key] ~= record.version or pending[key] or meshRetry[key] or referenceRetry[key] or (appearanceRetry[key] and appearanceRetry[key] <= os.clock()) then
 			changed[key] = {
 				version = record.version,
-				value = force and copy(record.value) or merge(baseline[key], cachedSnapshot[key], record.value)
+				remoteValue = record.value,
+				value = force and copy(record.value) or mergeRoomRecord(key, record.value)
 			}
 		end
 	end
@@ -2076,12 +2086,12 @@ local function applyRemoteRecords(remote, force)
 						applyScriptSourceWithCursorPreservation(obj, key, value)
 					elseif obj:IsA("Model") and (name == "CFrame" or name == "WorldPivot") then
 						local cf = decode(value)
-						if typeof(cf) == "CFrame" then
+						if typeof(cf) == "CFrame" and not equal(encode(obj:GetPivot()), value) then
 							obj:PivotTo(cf)
 						end
 					elseif obj:IsA("BasePart") and name == "CFrame" then
 						local cf = decode(value)
-						if typeof(cf) == "CFrame" then
+						if typeof(cf) == "CFrame" and not equal(encode(obj.CFrame), value) then
 							obj.CFrame = cf
 						end
 					elseif not equal(encode(obj[name]), value) then
@@ -2164,9 +2174,9 @@ local function applyRemoteRecords(remote, force)
 				local ok, cap = pcall(capture, obj, key)
 				if ok then
 					cachedSnapshot[key] = cap
-					baseline[key] = acknowledged(r.value, r.value, cap)
+					baseline[key] = acknowledged(r.remoteValue, r.value, cap)
 				else
-					baseline[key] = copy(r.value)
+					baseline[key] = copy(r.remoteValue)
 					cachedSnapshot[key] = copy(r.value)
 				end
 			end
@@ -2232,7 +2242,7 @@ local function sendChanges(current)
 	if restoringRemoteHistory then error("Waiting for Studio to restore a synchronized edit") end
 	local list = changes(current)
 	if #list > 0 then
-		local result = request("POST", {changes = list, since = currentRevision})
+		local result = request("POST", {changes = list, since = currentRevision, rebase = true})
 		if not result.conflict then
 			warnings.syncConflict = nil
 			lastKnownObjectCount = result.objectsCount or lastKnownObjectCount
@@ -2250,6 +2260,7 @@ local function sendChanges(current)
 			end
 
 			if result.remoteChanges and next(result.remoteChanges) then
+				snapshot(false)
 				apply(result.remoteChanges, current, false)
 			end
 			currentRevision = result.revision
@@ -2268,6 +2279,7 @@ local function sendChanges(current)
 	end
 
 	if latest.delta then
+		snapshot(false)
 		apply(latest.objects, current, false)
 	else
 		apply(latest.objects, current, true)

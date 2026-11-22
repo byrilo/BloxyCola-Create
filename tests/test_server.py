@@ -210,6 +210,26 @@ class TestSyncProtocol(ServerTestBase):
             status, body = self.sync(self.token, self.room, [{"id": "k1", "value": value}], since=rev)
             self.assertEqual(body["revision"], rev, "identical writes must not create revisions")
 
+    def test_stale_edit_cannot_overwrite_a_newer_object_with_rebase(self):
+        old = {"class": "Part", "props": {"Name": "Original"}}
+        newer = {"class": "Part", "props": {"Name": "Renamed"}}
+        _, initial = self.sync(self.token, self.room, [{"id": "part", "value": old}])
+        peer = self.register("Peer")
+        _, updated = self.sync(peer, self.room, [{"id": "part", "value": newer}],
+                               since=initial["revision"])
+
+        status, _ = http_json(
+            self.base, f"/api/rooms/{self.room}/sync",
+            {"changes": [{"id": "part", "deleted": True}],
+             "since": initial["revision"], "rebase": True},
+            token=self.token,
+        )
+        self.assertEqual(status, 409)
+
+        _, latest = self.get_sync(self.token, self.room, since=initial["revision"])
+        self.assertEqual(latest["revision"], updated["revision"])
+        self.assertEqual(latest["objects"]["part"]["value"], newer)
+
     def test_sync_rejects_malformed_changes(self):
         status, body = http_json(
             self.base,

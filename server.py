@@ -1211,6 +1211,12 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                     since_rev = 0
                 self.remember_client_revision(r, token, since_rev)
 
+                if data.get("rebase") is True and since_rev < r["revision"]:
+                    deltas = self.compute_deltas_since(r, since_rev)
+                    if any(ch.get("id") in deltas for ch in changes):
+                        self.send_json(409, {"error": "Refresh conflicting objects before retrying"})
+                        return
+
                 # Collect remote changes that occurred since client's known revision BEFORE applying client's batch
                 remote_deltas = {}
                 if since_rev > 0 and since_rev < r["revision"]:
