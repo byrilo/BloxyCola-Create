@@ -2694,7 +2694,7 @@ local function connectSession()
 		local current = snapshot(true)
 		local state = request("GET")
 		if state.unchanged or next(state.objects or {}) == nil then
-			if not state.owner then
+			if state.owner ~= true and state.owner ~= credential then
 				error("Host has not published the place yet")
 			end
 			state = sendChanges(current)

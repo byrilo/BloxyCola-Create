@@ -30,6 +30,7 @@ import hashlib
 import difflib
 import argparse
 import threading
+from html import escape
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -687,8 +688,8 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                     "owner": r.get("owner_name", "Host"),
                 })
             guests_list = [
-                {"name": g.get("name", "Guest"), "token": t[:10] + "...", "active": (now - g.get("last_seen", 0) < 30)}
-                for t, g in guests.items()
+                {"name": g.get("name", "Guest"), "active": (now - g.get("last_seen", 0) < 30)}
+                for g in guests.values()
             ]
 
         html = f"""<!DOCTYPE html>
@@ -780,12 +781,12 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
       </thead>
       <tbody>
         {''.join(f"""<tr>
-          <td><strong>{r['name']}</strong><br><span style="color:var(--muted);font-size:12px">Host: {r['owner']}</span></td>
-          <td><code>{r['id']}</code></td>
+          <td><strong>{escape(str(r['name']))}</strong><br><span style="color:var(--muted);font-size:12px">Host: {escape(str(r['owner']))}</span></td>
+          <td><code>{escape(str(r['id']))}</code></td>
           <td><span style="color:var(--green)">rev {r['revision']}</span></td>
           <td>{r['objects']:,}</td>
-          <td>{''.join(f'<span class="peer-pill">{p}</span>' for p in r['peers']) if r['peers'] else '<span style="color:var(--muted)">Idle</span>'}</td>
-          <td><a class="btn" href="/api/rooms/{r['id']}/export" download>📥 Download JSON</a></td>
+          <td>{''.join(f'<span class="peer-pill">{escape(str(p))}</span>' for p in r['peers']) if r['peers'] else '<span style="color:var(--muted)">Idle</span>'}</td>
+          <td><a class="btn" href="/api/rooms/{escape(str(r['id']))}/export" download>📥 Download JSON</a></td>
         </tr>""" for r in rooms_list)}
       </tbody>
     </table>''' if rooms_list else '<div class="empty-state">No active rooms yet. Click "Start Hosting Current Place" in the Roblox Studio plugin to create a room.</div>'}
@@ -799,14 +800,12 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
       <thead>
         <tr>
           <th>Name</th>
-          <th>Token</th>
           <th>Status</th>
         </tr>
       </thead>
       <tbody>
         {''.join(f"""<tr>
-          <td><strong>{g['name']}</strong></td>
-          <td><code>{g['token']}</code></td>
+          <td><strong>{escape(str(g['name']))}</strong></td>
           <td>{'<span class="badge" style="padding:2px 8px;font-size:11px"><span class="dot"></span> Online</span>' if g['active'] else '<span style="color:var(--muted);font-size:12px">Idle</span>'}</td>
         </tr>""" for g in guests_list)}
       </tbody>
@@ -879,7 +878,7 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                     active_testers = [
                         p.get("name", "Peer")
                         for p in r.get("presence", {}).values()
-                        if p.get("teamTest", {}).get("active") and now - p.get("time", 0) < 15
+                        if (p.get("teamTest") or {}).get("active") and now - p.get("time", 0) < 15
                     ]
                     res.append({
                         "id": r_id,
@@ -944,7 +943,7 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                 self.send_json(200, {
                     "revision": r["revision"],
                     "objects": r["objects"],
-                    "owner": r["owner"],
+                    "owner": r["owner"] == token,
                     "lastSaved": r.get("last_saved", 0),
                     "objectsCount": len(r["objects"]),
                 })
@@ -966,7 +965,7 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                 active_testers = [
                     p.get("name", "Peer")
                     for p in r.get("presence", {}).values()
-                    if p.get("teamTest", {}).get("active") and now - p.get("time", 0) < 15
+                    if (p.get("teamTest") or {}).get("active") and now - p.get("time", 0) < 15
                 ]
                 is_owner = (r["owner"] == token) or (user_name != "" and user_name.lower() == r.get("owner_name", "").lower())
                 self.send_json(200, {
@@ -1042,6 +1041,7 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                     return
                 r = rooms[room_id]
                 serialized = serialize_room(r)
+                serialized.pop("owner", None)
             content = json.dumps(serialized, indent=2, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1318,14 +1318,15 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                 if data.get("leave"):
                     r["presence"].pop(token, None)
                 else:
+                    team_test = data.get("teamTest")
                     r["presence"][token] = {
-                        "id": token,
+                        "id": hashlib.sha256(token.encode("utf-8")).hexdigest(),
                         "name": user_name,
                         "position": data.get("position", [0, 10, 0]),
                         "look": data.get("look", [0, 0, -1]),
                         "selected": data.get("selected", []),
                         "transforms": data.get("transforms", {}),
-                        "teamTest": data.get("teamTest", None),
+                        "teamTest": team_test if isinstance(team_test, dict) else {},
                         "activeScript": data.get("activeScript", None),
                         "ping": data.get("ping", None),
                         "hue": stable_hue(token),

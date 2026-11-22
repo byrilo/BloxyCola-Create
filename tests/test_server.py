@@ -492,6 +492,26 @@ class TestServerFeatures(ServerTestBase):
         _, summary = http_json(self.base, base_path + "/chat", token=peer)
         self.assertNotIn("playtest", summary)
 
+    def test_sync_and_presence_return_no_guest_credentials(self):
+        host = self.register("PresenceHost")
+        guest = self.register("PresenceGuest")
+        room_id = self.create_room(host)
+        base_path = f"/api/rooms/{room_id}"
+
+        self.assertIs(self.get_sync(host, room_id)[1]["owner"], True)
+        self.assertIs(self.get_sync(guest, room_id)[1]["owner"], False)
+        status, _ = http_json(self.base, base_path + "/presence", {}, token=host)
+        self.assertEqual(status, 200)
+        status, peers = http_json(self.base, base_path + "/presence", {}, token=guest)
+        self.assertEqual(status, 200)
+        self.assertEqual(peers[0]["name"], "PresenceHost")
+        self.assertNotEqual(peers[0]["id"], host)
+        status, rooms = http_json(self.base, "/api/rooms", token=guest)
+        self.assertEqual(status, 200)
+        self.assertIn(room_id, {room["id"] for room in rooms})
+        status, _ = http_json(self.base, base_path + "/state", token=guest)
+        self.assertEqual(status, 200)
+
     def test_room_export(self):
         _, g = http_json(self.base, "/api/guest", {"name": "Exporter"})
         _, r = http_json(self.base, "/api/rooms", {"name": "ExportPlace"}, token=g["token"])
@@ -501,6 +521,7 @@ class TestServerFeatures(ServerTestBase):
             self.assertIn("attachment", resp.headers.get("Content-Disposition", ""))
             payload = json.loads(resp.read().decode("utf-8"))
             self.assertEqual(payload["name"], "ExportPlace")
+            self.assertNotIn("owner", payload)
 
     def test_merge_3way_text(self):
         base = "def foo():\n    return 1\n\ndef bar():\n    return 2\n"
