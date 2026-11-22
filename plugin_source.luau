@@ -1947,10 +1947,11 @@ local function loadMesh(obj, key, value)
 		for _, name in ipairs({"CollisionFidelity", "RenderFidelity", "FluidFidelity"}) do
 			if p[name] then options[name] = decode(p[name]) end
 		end
-		local fresh = Assets:CreateMeshPartAsync(source, options)
+		local fresh = game:GetService("AssetService"):CreateMeshPartAsync(source, options)
 		if not fresh then error("Roblox did not return mesh geometry") end
-		obj:ApplyMesh(fresh)
+		local applied, err = pcall(obj.ApplyMesh, obj, fresh)
 		fresh:Destroy()
+		if not applied then error(err) end
 	end)
 	if success then
 		meshRetry[key] = nil
