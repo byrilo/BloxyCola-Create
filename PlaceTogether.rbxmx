@@ -510,6 +510,22 @@ do
 	inviteStatus.TextSize = 11
 end
 
+local roomCode = {}
+do
+	local roomCodeCard = card(homePanel, "RoomCode")
+	title("Room code", roomCodeCard)
+	roomCode.input = field("Paste a room code", "", roomCodeCard)
+	roomCode.join = makeButton("Join by room code", roomCodeCard, "primary")
+	roomCode.shared = field("", "", roomCodeCard)
+	roomCode.shared.Visible = false
+	roomCode.shared.Focused:Connect(function()
+		roomCode.shared.CursorPosition = #roomCode.shared.Text + 1
+		roomCode.shared.SelectionStart = 1
+	end)
+	roomCode.hint = textLabel("Open an empty Baseplate before joining.", 18, roomCodeCard)
+	roomCode.hint.TextWrapped = true
+end
+
 local incomingCard = card(homePanel, "Incoming")
 local incoming
 local yes
@@ -833,6 +849,12 @@ local function refreshUI(isActive, isLoggedIn, hasInbox, isBusy)
 	sessionCard.Visible = isActive
 	connect.Visible = isActive
 	hostStartBtn.Visible = isLoggedIn and not isActive
+	roomCode.input.Visible = not isActive
+	roomCode.join.Visible = not isActive
+	roomCode.shared.Visible = isActive
+	if isActive and not roomCode.shared:IsFocused() then roomCode.shared.Text = room.Text end
+	roomCode.hint.Text = isActive and "Click the code, then press Ctrl+C to copy it."
+		or "Open an empty Baseplate before joining."
 	incomingCard.Visible = hasInbox
 	retry.Visible = isLoggedIn and not isActive and room.Text ~= ""
 
@@ -847,7 +869,7 @@ local function refreshUI(isActive, isLoggedIn, hasInbox, isBusy)
 		end
 	end
 
-	for _, b in ipairs({invite, yes, no, connect, retry, accept, logout, hostStartBtn, quickSaveBtn, dropPingBtn, chatSendBtn, createSnapBtn, undoControls.button}) do
+	for _, b in ipairs({invite, yes, no, connect, retry, accept, logout, hostStartBtn, quickSaveBtn, dropPingBtn, chatSendBtn, createSnapBtn, undoControls.button, roomCode.join}) do
 		b.Active = not isBusy
 		b.AutoButtonColor = not isBusy
 		b.TextTransparency = isBusy and 0.45 or 0
@@ -2839,9 +2861,9 @@ local function joinExistingRoomById(targetRoomId, targetRoomName)
 	end
 	inviting = true
 	local ok, err = pcall(function()
-		api("/rooms/"..targetRoomId.."/join", "POST")
+		local joined = api("/rooms/"..targetRoomId.."/join", "POST")
 		room.Text = targetRoomId
-		sessionTitle.Text = targetRoomName or "Studio Project"
+		sessionTitle.Text = targetRoomName or joined.name or "Studio Project"
 		index()
 		local initial = api("/rooms/"..room.Text.."/sync")
 		if initial.objects and next(initial.objects) ~= nil then
@@ -2876,6 +2898,35 @@ local function joinExistingRoomById(targetRoomId, targetRoomName)
 	inviting = false
 	if not ok then status("Failed to join room: "..tostring(err)) end
 end
+
+function roomCode.connect()
+	if busy or inviting then return end
+	if not loggedIn then
+		status("Connect to the host server first.")
+		return
+	end
+	if active or inPlaytest() then
+		status("Leave the current session or playtest before joining by code.")
+		return
+	end
+	local code = roomCode.input.Text:match("^%s*([%da-fA-F]+)%s*$")
+	if not code or #code > 32 then
+		status("Paste the room code provided by the host.")
+		return
+	end
+	if not emptyPlace() then
+		status("Open a new empty Baseplate before joining by code.")
+		return
+	end
+	joinExistingRoomById(code:lower())
+	if active then roomCode.input.Text = "" end
+end
+
+roomCode.join.Activated:Connect(roomCode.connect)
+roomCode.input.FocusLost:Connect(function(enterPressed)
+	if enterPressed then roomCode.connect() end
+end)
+roomCode.shared.FocusLost:Connect(function() roomCode.shared.Text = room.Text end)
 
 local function acceptInvitation()
 	if not inbox or inviting or busy then return end
