@@ -14,7 +14,7 @@ end
 task.defer(function()
 	if inPlaytest() then return end
 	local sound = Instance.new("Sound")
-	sound.SoundId = "rbxasset://sounds/bloxy-cola.mp3"
+	sound.SoundId = "rbxassetid://10721950"
 	sound.Volume = 0.45
 	local soundService = game:GetService("SoundService")
 	pcall(soundService.PlayLocalSound, soundService, sound)
