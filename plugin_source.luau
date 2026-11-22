@@ -11,15 +11,6 @@ local function inPlaytest()
 	end)
 	return ok and not editModeActive
 end
-task.defer(function()
-	if inPlaytest() then return end
-	local sound = Instance.new("Sound")
-	sound.SoundId = "rbxassetid://10721950"
-	sound.Volume = 0.45
-	local soundService = game:GetService("SoundService")
-	pcall(soundService.PlayLocalSound, soundService, sound)
-	sound:Destroy()
-end)
 
 local Selection = game:GetService("Selection")
 local UserInputService = game:GetService("UserInputService")
@@ -864,6 +855,35 @@ local function refreshUI(isActive, isLoggedIn, hasInbox, isBusy)
 		b.AutoButtonColor = not isBusy
 		b.TextTransparency = isBusy and 0.45 or 0
 	end
+end
+
+do
+	local sound = Instance.new("Sound")
+	sound.Name = "BloxyColaOpening"
+	sound.SoundId = "rbxassetid://10721950"
+	sound.Volume = 0.45
+	sound.Parent = widget
+
+	local loading = false
+	local function playOnOpen()
+		if loading or not widget.Enabled or inPlaytest() then return end
+		loading = true
+		task.spawn(function()
+			local content = game:GetService("ContentProvider")
+			local ok, err = pcall(content.PreloadAsync, content, {sound})
+			loading = false
+			if not widget.Enabled or inPlaytest() then return end
+			if not ok or not sound.IsLoaded then
+				warn("BloxyCola Create: opening sound could not be loaded ("..sound.SoundId..")"
+					..(not ok and (": "..tostring(err)) or ""))
+				return
+			end
+			sound:Play()
+		end)
+	end
+
+	widget:GetPropertyChangedSignal("Enabled"):Connect(playOnOpen)
+	task.defer(playOnOpen)
 end
 
 button.Click:Connect(function()
