@@ -660,12 +660,7 @@ do
 	addressHeader.TextColor3 = palette.subtle
 
 	address = field("http://127.0.0.1:8787", savedAddress)
-	local testLocalhostBtn = makeButton("⚡ Connect Localhost (127.0.0.1:8787)", settingsPanel, "primary", 30)
-	testLocalhostBtn.MouseButton1Click:Connect(function()
-		address.Text = "http://127.0.0.1:8787"
-		plugin:SetSetting("PTServerAddress", address.Text)
-		setNotice("Address set to http://127.0.0.1:8787")
-	end)
+	diagnostics.localhost = makeButton("Use localhost (127.0.0.1:8787)", settingsPanel, "primary", 30)
 
 	local addressHint = textLabel("All participants must enter the same server address (Localhost, LAN, Radmin, Hamachi, or tunnel).", 18)
 	addressHint.TextSize = 11
@@ -2528,6 +2523,12 @@ local polling = false
 local function base()
 	return address.Text:gsub("%s+", ""):gsub("/+$", "")
 end
+
+diagnostics.localhost.Activated:Connect(function()
+	address.Text = "http://127.0.0.1:8787"
+	plugin:SetSetting("PTAddress", address.Text)
+	status("Address set to http://127.0.0.1:8787")
+end)
 
 diagnostics.check.Activated:Connect(function()
 	if diagnostics.checking then return end
