@@ -795,7 +795,7 @@ local function status(s)
 	setNotice(s)
 end
 
-local function warn(key, message)
+local function recordWarning(key, message)
 	warnings[key] = message
 end
 
@@ -1345,7 +1345,7 @@ local function applyTerrain(key, value)
 		cachedSnapshot[key] = copy(value)
 		warnings[key..":terrain"] = nil
 	else
-		warn(key..":terrain", "Terrain: "..tostring(err))
+		recordWarning(key..":terrain", "Terrain: "..tostring(err))
 	end
 end
 
@@ -1554,7 +1554,7 @@ local function capture(obj, key)
 				p[property] = value
 			end
 			if value == nil and PropRules.appearanceSet[property] then
-				warn(key..":content:"..property, obj.Name.."."..property..": local EditableImage cannot be sent as URI")
+				recordWarning(key..":content:"..property, obj.Name.."."..property..": local EditableImage cannot be sent as URI")
 			else
 				warnings[key..":content:"..property] = nil
 			end
@@ -1573,7 +1573,7 @@ local function capture(obj, key)
 			p.Source = text:gsub(string.char(13, 10), string.char(10)):gsub(string.char(13), string.char(10))
 			warnings[key..":Source"] = nil
 		else
-			warn(key..":Source", obj.Name..": cannot access script source")
+			recordWarning(key..":Source", obj.Name..": cannot access script source")
 		end
 	end
 	if obj:IsA("MeshPart") then
@@ -1869,7 +1869,7 @@ local function snapshot(forceFull)
 				if ok then
 					cachedSnapshot[key] = value
 				else
-					warn(key..":capture", obj.Name..": error reading object")
+					recordWarning(key..":capture", obj.Name..": error reading object")
 					cachedSnapshot[key] = baseline[key]
 				end
 			else
@@ -1963,7 +1963,7 @@ local function loadMesh(obj, key, value)
 		warnings[key..":mesh"] = nil
 	else
 		meshRetry[key] = os.clock() + 15
-		warn(key..":mesh", value.name..": Roblox refused to load mesh; other parts continue syncing")
+		recordWarning(key..":mesh", value.name..": Roblox refused to load mesh; other parts continue syncing")
 	end
 end
 
@@ -2068,7 +2068,7 @@ local function applyRemoteRecords(remote, force)
 				warnings[key..":create"] = nil
 			else
 				pending[key] = true
-				warn(key..":create", r.value.name..": class cannot be created via API")
+				recordWarning(key..":create", r.value.name..": class cannot be created via API")
 			end
 			checkYield("Creating objects...")
 		end
@@ -2120,7 +2120,7 @@ local function applyRemoteRecords(remote, force)
 				warnings[key..":parent"] = nil
 			else
 				pending[key] = true
-				warn(key..":parent", v.name..": waiting for parent object")
+				recordWarning(key..":parent", v.name..": waiting for parent object")
 			end
 		end
 	end
@@ -2198,7 +2198,7 @@ local function applyRemoteRecords(remote, force)
 				if ok then
 					warnings[key..":"..name] = nil
 				else
-					warn(key..":"..name, v.name.."."..name..": unavailable via API")
+					recordWarning(key..":"..name, v.name.."."..name..": unavailable via API")
 					if PropRules.appearanceSet[name] then
 						appearanceRetry[key] = os.clock() + 10
 					end
@@ -2244,7 +2244,7 @@ local function applyRemoteRecords(remote, force)
 				meshRetry[key] = nil
 				referenceRetry[key] = nil
 			else
-				warn(key..":delete", obj.Name..": Roblox prevented deletion")
+				recordWarning(key..":delete", obj.Name..": Roblox prevented deletion")
 			end
 		end
 	end
@@ -3192,7 +3192,7 @@ local function playNotificationSound()
 		local s = Instance.new("Sound")
 		s.SoundId = "rbxasset://sounds/electronicpingshort.wav"
 		s.Volume = 0.5
-		s.Parent = game:GetService("SoundService")
+		s.Parent = widget
 		s:Play()
 		task.delay(2, function() s:Destroy() end)
 	end)
@@ -3287,6 +3287,7 @@ chatInput.FocusLost:Connect(function(enterPressed)
 	end
 end)
 
+local TT
 local function drop3DBeaconAtCursor()
 	local cam = workspace.CurrentCamera
 	if not cam then return end
@@ -3706,7 +3707,7 @@ end)
 -- ============================================================
 -- CO-OP TEAM TEST SUB-SYSTEM (60 FPS MULTIPLAYER PLAYTEST)
 -- ============================================================
-local TT = {
+TT = {
 	active = false,
 	folder = nil,
 	char = nil,
