@@ -1,4 +1,4 @@
--- PlaceTogether 3.0: Ultra-Smooth Real-Time Collaborative Building in Roblox Studio
+-- BloxyCola Create — Collaborative editing in Roblox Studio
 local History = game:GetService("ChangeHistoryService")
 local Http = game:GetService("HttpService")
 local Editor = game:GetService("ScriptEditorService")
@@ -49,37 +49,37 @@ if type(savedAddress) ~= "string" or savedAddress == "" then
 	savedAddress = "http://127.0.0.1:8787"
 end
 
-local toolbar = plugin:CreateToolbar("PlaceTogether")
-local button = toolbar:CreateButton("PlaceTogether", "Collaborative Building v3.0", "")
+local toolbar = plugin:CreateToolbar("BloxyCola Create")
+local button = toolbar:CreateButton("PlaceTogether", "Open BloxyCola Create", "")
 local teamTestToolbarBtn = toolbar:CreateButton("TeamTest", "Show Roblox playtest options", "")
 local widget = plugin:CreateDockWidgetPluginGuiAsync(
 	"PlaceTogetherInvites03",
 	DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 360, 580, 300, 420)
 )
-widget.Title = "PlaceTogether 3.0"
+widget.Title = "BloxyCola Create"
 
 local palette = {
-	bg = Color3.fromRGB(13, 15, 21),
-	card = Color3.fromRGB(21, 25, 34),
-	cardBorder = Color3.fromRGB(36, 43, 58),
-	field = Color3.fromRGB(16, 19, 27),
-	fieldBorder = Color3.fromRGB(46, 55, 74),
-	fieldFocus = Color3.fromRGB(88, 148, 255),
-	line = Color3.fromRGB(36, 43, 58),
-	text = Color3.fromRGB(248, 250, 252),
-	muted = Color3.fromRGB(148, 163, 184),
-	subtle = Color3.fromRGB(100, 116, 139),
-	accent = Color3.fromRGB(59, 130, 246),
-	accentBorder = Color3.fromRGB(96, 165, 250),
-	ink = Color3.fromRGB(255, 255, 255),
+	bg = Color3.fromRGB(25, 16, 10),
+	card = Color3.fromRGB(46, 28, 16),
+	cardBorder = Color3.fromRGB(111, 69, 30),
+	field = Color3.fromRGB(32, 20, 12),
+	fieldBorder = Color3.fromRGB(127, 80, 38),
+	fieldFocus = Color3.fromRGB(255, 195, 86),
+	line = Color3.fromRGB(99, 60, 29),
+	text = Color3.fromRGB(255, 241, 206),
+	muted = Color3.fromRGB(222, 187, 141),
+	subtle = Color3.fromRGB(190, 151, 110),
+	accent = Color3.fromRGB(242, 171, 49),
+	accentBorder = Color3.fromRGB(255, 216, 112),
+	ink = Color3.fromRGB(38, 21, 9),
 	green = Color3.fromRGB(34, 197, 94),
 	greenBg = Color3.fromRGB(18, 46, 30),
 	greenBorder = Color3.fromRGB(40, 120, 68),
 	danger = Color3.fromRGB(239, 68, 68),
 	dangerBg = Color3.fromRGB(45, 22, 26),
 	dangerBorder = Color3.fromRGB(120, 40, 50),
-	tabBg = Color3.fromRGB(18, 21, 29),
-	tabActive = Color3.fromRGB(33, 40, 56),
+	tabBg = Color3.fromRGB(40, 23, 13),
+	tabActive = Color3.fromRGB(102, 57, 21),
 }
 
 local loggedIn = false
@@ -228,7 +228,7 @@ local function makeButton(text, parent, kind, height)
 		stroke(b, palette.dangerBorder, 1)
 	else
 		b.TextColor3 = palette.text
-		b.BackgroundColor3 = Color3.fromRGB(28, 33, 45)
+		b.BackgroundColor3 = palette.tabActive
 		b.Font = Enum.Font.GothamMedium
 		stroke(b, palette.line, 1)
 	end
@@ -258,11 +258,12 @@ do
 	header.BackgroundTransparency = 1
 	header.Parent = frame
 
-	local brand = title("PlaceTogether 3.0", header)
+	local brand = title("BloxyCola Create", header)
 	brand.Size = UDim2.new(1, -100, 0, 22)
 	brand.TextSize = 17
+	brand.TextColor3 = palette.accentBorder
 
-	identity = textLabel("Ultra-Smooth Co-op Engine", 16, header)
+	identity = textLabel("Collaborative editing", 16, header)
 	identity.Position = UDim2.fromOffset(0, 24)
 	identity.AutomaticSize = Enum.AutomaticSize.None
 	identity.TextColor3 = palette.subtle
@@ -631,9 +632,9 @@ do
 	end)
 
 	local creditsCard = card(settingsPanel, "CreditsCard")
-	local credTitle = title("PlaceTogether 3.0", creditsCard)
+	local credTitle = title("BloxyCola Create", creditsCard)
 	credTitle.TextSize = 14
-	local credSub = textLabel("Ultra-Fast Event-Driven Co-op Fork", 16, creditsCard)
+	local credSub = textLabel("Based on Place Together Remake", 16, creditsCard)
 	credSub.TextSize = 11
 	credSub.TextColor3 = palette.subtle
 end
@@ -3653,7 +3654,7 @@ function TT.start()
 	local respawnBtn = Instance.new("TextButton")
 	respawnBtn.Size = UDim2.fromOffset(76, 26)
 	respawnBtn.Position = UDim2.new(1, -165, 0.5, -13)
-	respawnBtn.BackgroundColor3 = Color3.fromRGB(28, 33, 45)
+	respawnBtn.BackgroundColor3 = palette.tabActive
 	respawnBtn.BorderSizePixel = 0
 	respawnBtn.Font = Enum.Font.GothamBold
 	respawnBtn.TextSize = 11
