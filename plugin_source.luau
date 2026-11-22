@@ -366,6 +366,7 @@ end
 local sessionCard = card(homePanel, "Session")
 local sessionTitle
 local sessionStats
+local diagnostics = {}
 local participantsText
 local quickSaveBtn
 local dropPingBtn
@@ -395,6 +396,8 @@ do
 	sessionStats = textLabel("Rev 1 · 0 objects · Auto-save active", 18, sessionCard)
 	sessionStats.TextColor3 = palette.muted
 	sessionStats.TextSize = 11
+	diagnostics.sync = textLabel("Waiting for first sync", 18, sessionCard)
+	diagnostics.sync.TextSize = 11
 
 	participantsText = textLabel("Participants will appear once connected.", 20, sessionCard)
 	participantsText.TextColor3 = palette.subtle
@@ -661,6 +664,11 @@ do
 	serverSecret.FocusLost:Connect(function()
 		plugin:SetSetting("PTSecret", serverSecret.Text)
 	end)
+
+	local connectionCard = card(settingsPanel, "ServerCheck")
+	diagnostics.check = makeButton("Check server connection", connectionCard)
+	diagnostics.result = textLabel("", 18, connectionCard)
+	diagnostics.result.TextWrapped = true
 
 	local creditsCard = card(settingsPanel, "CreditsCard")
 	local credTitle = title("BloxyCola Create", creditsCard)
@@ -1686,6 +1694,8 @@ local function setupRootWatchers()
 end
 
 local function index()
+	diagnostics.lastSync, diagnostics.requestMs, diagnostics.queue = nil, nil, nil
+	diagnostics.sync.Text = "Waiting for first sync"
 	table.clear(undoControls.history)
 	clearWatchers()
 	currentRevision = 0
@@ -1839,6 +1849,7 @@ local function request(method, payload, renewed)
 		end
 	end
 
+	local started = os.clock()
 	local response = Http:RequestAsync({
 		Url = reqUrl,
 		Method = method,
@@ -1866,6 +1877,7 @@ local function request(method, payload, renewed)
 	if not response.Success then
 		error(value.error or ("HTTP "..response.StatusCode))
 	end
+	diagnostics.requestMs = math.floor((os.clock() - started) * 1000 + 0.5)
 	return value
 end
 
@@ -2366,9 +2378,11 @@ end
 local function sendChanges(current)
 	if restoringRemoteHistory then error("Waiting for Studio to restore a synchronized edit") end
 	local list = changes(current)
+	diagnostics.queue = #list
 	if #list > 0 then
 		local result = request("POST", {changes = list, since = currentRevision, rebase = true})
 		if not result.conflict then
+			diagnostics.queue = 0
 			warnings.syncConflict = nil
 			lastKnownObjectCount = result.objectsCount or lastKnownObjectCount
 			lastSaveTimestamp = result.lastSaved or lastSaveTimestamp
@@ -2487,6 +2501,45 @@ local polling = false
 local function base()
 	return address.Text:gsub("%s+", ""):gsub("/+$", "")
 end
+
+diagnostics.check.Activated:Connect(function()
+	if diagnostics.checking then return end
+	local server = base()
+	if not server:match("^https?://[^/]+") then
+		diagnostics.result.Text = "Enter an HTTP or HTTPS server address."
+		return
+	end
+
+	diagnostics.checking = true
+	diagnostics.result.Text = "Checking server..."
+	local started = os.clock()
+	local ok, response = pcall(Http.RequestAsync, Http, {
+		Url = server.."/api/status?_t="..tostring(started),
+		Method = "GET",
+		Headers = {["X-PT-Secret"] = serverSecret.Text, ["bypass-tunnel-reminder"] = "true"},
+	})
+	diagnostics.checking = false
+	if server ~= base() then
+		diagnostics.result.Text = "Address changed. Check again."
+		return
+	end
+	if not ok then
+		diagnostics.result.Text = "Server did not respond. Check its address and Studio HTTP permissions."
+		return
+	end
+	if response.StatusCode == 401 then
+		diagnostics.result.Text = "Server is reachable. Check the server password."
+		return
+	end
+	local decoded, value = pcall(Http.JSONDecode, Http, response.Body)
+	if not response.Success or not decoded or type(value) ~= "table" or value.status ~= "online" then
+		diagnostics.result.Text = "Unexpected server response (HTTP "..response.StatusCode..")."
+		return
+	end
+	local ms = math.floor((os.clock() - started) * 1000 + 0.5)
+	diagnostics.result.Text = string.format("Online · Server %s · %d ms · %s",
+		tostring(value.version or "?"), ms, value.auth_required and "Password accepted" or "No password")
+end)
 
 local function api(path, method, payload, renewed)
 	local reqUrl = base().."/api"..path
@@ -3384,6 +3437,16 @@ task.spawn(function()
 	end
 end)
 
+task.spawn(function()
+	while true do
+		if active and diagnostics.lastSync then
+			diagnostics.sync.Text = string.format("Synced %ds ago · HTTP %d ms · Last batch pending: %d",
+				os.time() - diagnostics.lastSync, diagnostics.requestMs or 0, diagnostics.queue or 0)
+		end
+		task.wait(1)
+	end
+end)
+
 -- High-frequency incremental sync loop (0.15s = ~6.6 Hz, O(dirty) overhead < 0.05ms)
 task.spawn(function()
 	local backoff = 0
@@ -3394,6 +3457,7 @@ task.spawn(function()
 			local ok, err = pcall(function()
 				local current = snapshot(false)
 				local state = sendChanges(current)
+				diagnostics.lastSync = os.time()
 				status(
 					(warnings.syncConflict and "Unsent changes pending" or ("Live · Rev "..state.revision))
 					.. " · Room " .. room.Text:sub(1, 8)
