@@ -661,6 +661,7 @@ do
 	addressHeader.TextColor3 = palette.subtle
 
 	address = field("http://127.0.0.1:8787", savedAddress)
+	diagnostics.startupSound = makeButton("Startup sound: On", settingsPanel)
 	diagnostics.localhost = makeButton("Use localhost (127.0.0.1:8787)", settingsPanel, "primary", 30)
 
 	local addressHint = textLabel("All participants must enter the same server address (Localhost, LAN, Radmin, Hamachi, or tunnel).", 18)
@@ -880,9 +881,21 @@ do
 	sound.Volume = 0.45
 	sound.Parent = widget
 
+	local enabled = plugin:GetSetting("PTStartupSound") ~= false
+	local function updateSoundButton()
+		diagnostics.startupSound.Text = enabled and "Startup sound: On" or "Startup sound: Off"
+	end
+	updateSoundButton()
+	diagnostics.startupSound.Activated:Connect(function()
+		enabled = not enabled
+		plugin:SetSetting("PTStartupSound", enabled)
+		updateSoundButton()
+		if not enabled then sound:Stop() end
+	end)
+
 	local loading = false
 	local function playOnOpen()
-		if loading or not widget.Enabled or inPlaytest() then return end
+		if loading or not enabled or not widget.Enabled or inPlaytest() then return end
 		loading = true
 		task.spawn(function()
 			local content = game:GetService("ContentProvider")
@@ -892,7 +905,7 @@ do
 				ok, err = pcall(content.PreloadAsync, content, {sound})
 			end
 			loading = false
-			if not widget.Enabled or inPlaytest() then return end
+			if not enabled or not widget.Enabled or inPlaytest() then return end
 			if not ok or not sound.IsLoaded then
 				warn("BloxyCola Create: opening sound could not be loaded ("..sound.SoundId..")"
 					..(not ok and (": "..tostring(err)) or ""))
