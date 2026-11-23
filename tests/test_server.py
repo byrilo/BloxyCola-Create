@@ -541,6 +541,23 @@ class TestServerFeatures(ServerTestBase):
         self.assertEqual(get_res["messages"][0]["text"], "Hello Bob!")
         self.assertEqual(get_res["messages"][1]["text"], "Hey Alice!")
 
+    def test_full_chat_keeps_same_tick_messages_distinct(self):
+        host = self.register("FullChat")
+        room_id = self.create_room(host)
+        path = f"/api/rooms/{room_id}/chat"
+        with server.lock:
+            server.rooms[room_id]["chat"] = [{"id": str(i)} for i in range(200)]
+        with mock.patch.object(server.time, "time", return_value=12345):
+            status, first = http_json(self.base, path, {"text": "first"}, token=host)
+            self.assertEqual(status, 200)
+            status, second = http_json(self.base, path, {"text": "second"}, token=host)
+            self.assertEqual(status, 200)
+        first_id = first["message"]["id"]
+        self.assertNotEqual(first_id, second["message"]["id"])
+        status, history = http_json(self.base, f"{path}?since={first_id}", token=host)
+        self.assertEqual(status, 200)
+        self.assertEqual(history["messages"], [second["message"]])
+
     def test_playtest_invite_is_shared_only_with_room_members(self):
         host = self.register("PlaytestHost")
         peer = self.register("Playtester")

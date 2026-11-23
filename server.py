@@ -509,7 +509,7 @@ def load_data(filepath):
                 "revision": int(r.get("revision", 1)),
                 "objects": r.get("objects", {}),
                 "tombstones": r.get("tombstones", {}),
-                "delta_floor": r.get("delta_floor", r["revision"]),
+                "delta_floor": int(r.get("delta_floor", r.get("revision", 1))),
                 "presence": {},
                 "persistent": r.get("persistent", True),
                 "closed": r.get("closed", False),
