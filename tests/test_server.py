@@ -426,6 +426,25 @@ class TestRevisionStream(ServerTestBase):
         self.assertEqual(stream.readline(), f"data: {revision}\n".encode("ascii"))
         self.assertEqual(stream.readline(), b"\n")
 
+    def test_future_and_pruned_revisions_require_full_snapshot(self):
+        host = self.register("RevisionReset")
+        room_id = self.create_room(host)
+        change = {"id": "stale", "value": {"name": "Stale part"}}
+        self.assertEqual(self.sync(host, room_id, [change], since=5)[0], 409)
+        with server.lock:
+            room = server.rooms[room_id]
+            room["revision"] = 4
+            room["clients"][host] = {"since": 4, "time": server.time.time()}
+            room["tombstones"]["removed"] = {"version": 3, "value": None}
+            with mock.patch.object(server, "MAX_TOMBSTONES_PER_ROOM", 0):
+                server.prune_tombstones(room)
+            self.assertEqual(server.serialize_room(room)["delta_floor"], 3)
+        self.assertEqual(self.sync(host, room_id, [change], since=2)[0], 409)
+        status, snapshot = self.get_sync(host, room_id, since=2)
+        self.assertEqual(status, 200)
+        self.assertFalse(snapshot.get("delta"))
+        self.assertEqual(snapshot["objects"], {})
+
     def test_notifies_peer_and_resumes_at_latest_revision(self):
         host = self.register("StreamHost")
         peer = self.register("StreamPeer")

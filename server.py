@@ -150,6 +150,7 @@ def serialize_room(r):
         "revision": r.get("revision", 1),
         "objects": r.get("objects", {}),
         "tombstones": r.get("tombstones", {}),
+        "delta_floor": r.get("delta_floor", 0),
         "persistent": r.get("persistent", True),
         "closed": r.get("closed", False),
         "members": list(r.get("members", [])),
@@ -183,6 +184,9 @@ def prune_tombstones(r):
         return
 
     min_safe_rev = min(since_values)
+    removed = [tomb.get("version", 0) for tomb in tombstones.values() if tomb.get("version", 0) <= min_safe_rev]
+    if removed:
+        r["delta_floor"] = max(r.get("delta_floor", 0), max(removed))
     r["tombstones"] = {
         obj_id: tomb
         for obj_id, tomb in tombstones.items()
@@ -505,6 +509,7 @@ def load_data(filepath):
                 "revision": int(r.get("revision", 1)),
                 "objects": r.get("objects", {}),
                 "tombstones": r.get("tombstones", {}),
+                "delta_floor": r.get("delta_floor", r["revision"]),
                 "presence": {},
                 "persistent": r.get("persistent", True),
                 "closed": r.get("closed", False),
@@ -998,7 +1003,7 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                     return
 
                 # Incremental delta since revision (lossless via object versions + tombstones)
-                if 0 < since_rev < r["revision"]:
+                if 0 < since_rev < r["revision"] and since_rev >= r.get("delta_floor", 0):
                     deltas = self.compute_deltas_since(r, since_rev)
                     self.send_json(200, {
                         "revision": r["revision"],
@@ -1308,6 +1313,10 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                 except (TypeError, ValueError):
                     since_rev = 0
                 self.remember_client_revision(r, token, since_rev)
+
+                if since_rev > r["revision"] or 0 < since_rev < r.get("delta_floor", 0):
+                    self.send_json(409, {"error": "Refresh the full room before sending changes"})
+                    return
 
                 if data.get("requireCurrentRevision") is True and since_rev != r["revision"]:
                     self.send_json(409, {"error": "The room changed while planning the undo"})
