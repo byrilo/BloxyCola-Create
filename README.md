@@ -4,7 +4,7 @@
 
 **Своя комната для совместной работы в Roblox Studio.** Редактируйте карту и скрипты через собственный сервер, затем приглашайте команду на плейтест.
 
-[Скачать v0.1.1 для Windows](https://github.com/byrilo/BloxyCola-Create/releases/download/v0.1.1/BloxyCola-Create-v0.1.1-windows.zip) · [Релизы](https://github.com/byrilo/BloxyCola-Create/releases) · [Сообщить об ошибке](https://github.com/byrilo/BloxyCola-Create/issues/new?template=bug.yml)
+[Скачать v0.1.2 для Windows](https://github.com/byrilo/BloxyCola-Create/releases/download/v0.1.2/BloxyCola-Create-v0.1.2-windows.zip) · [Релизы](https://github.com/byrilo/BloxyCola-Create/releases) · [Сообщить об ошибке](https://github.com/byrilo/BloxyCola-Create/issues/new?template=bug.yml)
 
 [![Тесты сервера](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml)
 
@@ -12,7 +12,7 @@
 
 ## Быстрый старт
 
-Для Windows понадобятся Roblox Studio и Python 3.
+Для Windows понадобятся Roblox Studio и Python 3.10 или новее.
 
 1. Скачайте ZIP по ссылке выше и распакуйте его. Дважды нажмите `InstallBloxyCola.bat`. Откройте или перезапустите Roblox Studio. Разрешите плагину HTTP-запросы и запись скриптов, когда Studio попросит.
 2. Запустите сервер из папки архива. Аргумент в примере задаёт пароль комнаты. Замените его своим.
