@@ -1605,7 +1605,7 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                     return
                 user_name = guests.get(token, {}).get("name", "User")
                 msg = {
-                    "id": f"{int(time.time()*1000)}_{len(r.get('chat', []))+1}",
+                    "id": secrets.token_urlsafe(16),
                     "from": user_name,
                     "text": raw_text[:500],
                     "time": time.time(),
