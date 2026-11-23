@@ -1202,7 +1202,7 @@ end
 local terrainCache = {}
 local terrainKnown = {}
 local terrainScanned = {}
-local terrainTracking = {captured = {}, edited = {}, scanIndex = 0}
+local terrainTracking = {captured = {}, edited = {}, scanIndex = 0, watched = {}, watchIndex = 1}
 local CHUNK, VOXELS = 64, 16
 
 local function terrainKey(x, y, z)
@@ -1289,6 +1289,8 @@ local function terrainReset()
 	table.clear(terrainTracking.captured)
 	table.clear(terrainTracking.edited)
 	terrainTracking.scanIndex = 0
+	table.clear(terrainTracking.watched)
+	terrainTracking.watchIndex = 1
 	dirtyTerrainChunks = {}
 end
 
@@ -1316,6 +1318,13 @@ pcall(function()
 	end)
 end)
 
+local function queueTerrain(x, y, z)
+	-- Terrain.MaxExtents spans [-128000, 128000] studs on each axis.
+	if math.max(x, y, z) >= 128000 or math.min(x, y, z) < -128000 then return end
+	local key = terrainKey(x, y, z)
+	dirtyTerrainChunks[key] = {x, y, z}
+end
+
 local function terrainRecords()
 	-- Discover nearby terrain, and rescan it in steps when Studio does not report brush edits.
 	pcall(function()
@@ -1333,7 +1342,7 @@ local function terrainRecords()
 				local x = cx + (i % 3 - 1) * CHUNK
 				local y = cy + (math.floor(i / 3) % 3 - 1) * CHUNK
 				local z = cz + (math.floor(i / 9) - 1) * CHUNK
-				dirtyTerrainChunks[terrainKey(x, y, z)] = {x, y, z}
+				queueTerrain(x, y, z)
 			end
 			terrainTracking.scanIndex = (scanIndex + 4) % 27
 			for x = cx - radius, cx + radius, CHUNK do
@@ -1341,8 +1350,7 @@ local function terrainRecords()
 					for z = cz - radius, cz + radius, CHUNK do
 						local key = terrainKey(x, y, z)
 						if not terrainScanned[key] then
-							terrainScanned[key] = true
-							dirtyTerrainChunks[key] = {x, y, z}
+							queueTerrain(x, y, z)
 							added += 1
 							if added >= 6 then return end
 						end
@@ -1352,25 +1360,52 @@ local function terrainRecords()
 		end
 	end)
 
-	if next(dirtyTerrainChunks) then
-		local processed = 0
-		for key, origin in pairs(dirtyTerrainChunks) do
-			local ok, value = pcall(readTerrain, origin)
-			if ok then
-				if active and terrainTracking.captured[key] and not equal(terrainCache[key], value) then
-					terrainTracking.edited[key] = true
-				end
-				terrainTracking.captured[key] = true
-				terrainCache[key] = value
-				if value or terrainKnown[key] then
-					terrainKnown[key] = origin
-				end
-				cachedSnapshot[key] = value
-			end
-			dirtyTerrainChunks[key] = nil
-			processed += 1
-			if processed >= 8 then break end
+	local function readChunk(key, origin)
+		local ok, value = pcall(readTerrain, origin)
+		if not ok then
+			recordWarning(key..":read", "Terrain: "..tostring(value))
+			return
 		end
+		warnings[key..":read"] = nil
+		terrainScanned[key] = true
+		if active and terrainTracking.captured[key] and not equal(terrainCache[key], value) then
+			terrainTracking.edited[key] = true
+		end
+		terrainTracking.captured[key] = true
+		terrainCache[key] = value
+		cachedSnapshot[key] = value
+		if value and not terrainKnown[key] then
+			terrainKnown[key] = origin
+			table.insert(terrainTracking.watched, origin)
+			-- Discover continuous terrain beyond the camera's immediate neighborhood.
+			local x, y, z = table.unpack(origin)
+			for _, neighbor in ipairs({
+				{x - CHUNK, y, z}, {x + CHUNK, y, z},
+				{x, y - CHUNK, z}, {x, y + CHUNK, z},
+				{x, y, z - CHUNK}, {x, y, z + CHUNK},
+			}) do
+				if not terrainScanned[terrainKey(table.unpack(neighbor))] then
+					queueTerrain(table.unpack(neighbor))
+				end
+			end
+		end
+	end
+
+	local watched = terrainTracking.watched
+	if #watched > 0 then
+		local origin = watched[terrainTracking.watchIndex]
+		terrainTracking.watchIndex = terrainTracking.watchIndex % #watched + 1
+		readChunk(terrainKey(table.unpack(origin)), origin)
+	end
+	local batch = {}
+	for key, origin in pairs(dirtyTerrainChunks) do
+		table.insert(batch, {key, origin})
+		if #batch >= 8 then break end
+	end
+	for _, item in ipairs(batch) do
+		local key, origin = item[1], item[2]
+		dirtyTerrainChunks[key] = nil
+		readChunk(key, origin)
 	end
 	return terrainCache
 end
@@ -1388,6 +1423,9 @@ local function applyTerrain(key, value)
 	if ok then
 		terrainTracking.captured[key] = true
 		terrainTracking.edited[key] = nil
+		if not terrainKnown[key] then
+			table.insert(terrainTracking.watched, origin)
+		end
 		terrainKnown[key] = origin
 		terrainScanned[key] = true
 		terrainCache[key] = copy(value)
@@ -1395,6 +1433,7 @@ local function applyTerrain(key, value)
 		warnings[key..":terrain"] = nil
 	else
 		recordWarning(key..":terrain", "Terrain: "..tostring(err))
+		error("Terrain chunk "..key.." could not be applied: "..tostring(err), 0)
 	end
 end
 
