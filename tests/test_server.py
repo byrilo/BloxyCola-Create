@@ -444,6 +444,9 @@ class TestServerFeatures(ServerTestBase):
             self.assertGreater(len(data["objects"]), 30)
 
     def test_dashboard_html_when_accept_html(self):
+        host = self.register("Host & peer")
+        room_id = self.create_room(host, "Room & map")
+        http_json(self.base, f"/api/rooms/{room_id}/presence", {}, token=host)
         req = urllib.request.Request(
             f"{self.base}/",
             headers={"Accept": "text/html,application/xhtml+xml"}
@@ -454,6 +457,9 @@ class TestServerFeatures(ServerTestBase):
             html = resp.read().decode("utf-8")
             self.assertIn("PlaceTogether 3.0", html)
             self.assertIn("Active Rooms", html)
+            self.assertIn("Room &amp; map", html)
+            self.assertIn("Host &amp; peer", html)
+            self.assertIn(f"/api/rooms/{room_id}/export", html)
 
     def test_room_chat_flow(self):
         _, g1 = http_json(self.base, "/api/guest", {"name": "Alice"})

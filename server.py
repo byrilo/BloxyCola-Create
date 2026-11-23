@@ -692,6 +692,60 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                 for g in guests.values()
             ]
 
+        room_rows = []
+        for room in rooms_list:
+            peer_pills = "".join(
+                f'<span class="peer-pill">{escape(str(peer))}</span>' for peer in room["peers"]
+            ) or '<span style="color:var(--muted)">Idle</span>'
+            room_id = escape(str(room["id"]))
+            room_rows.append(f"""<tr>
+              <td><strong>{escape(str(room['name']))}</strong><br><span style="color:var(--muted);font-size:12px">Host: {escape(str(room['owner']))}</span></td>
+              <td><code>{room_id}</code></td>
+              <td><span style="color:var(--green)">rev {room['revision']}</span></td>
+              <td>{room['objects']:,}</td>
+              <td>{peer_pills}</td>
+              <td><a class="btn" href="/api/rooms/{room_id}/export" download>Download JSON</a></td>
+            </tr>""")
+        room_rows = "".join(room_rows)
+        room_table = f'''<table>
+      <thead>
+        <tr>
+          <th>Room Name</th>
+          <th>Room ID</th>
+          <th>Revision</th>
+          <th>Objects</th>
+          <th>Active Peers</th>
+          <th>Export</th>
+        </tr>
+      </thead>
+      <tbody>
+        {room_rows}
+      </tbody>
+    </table>''' if rooms_list else '<div class="empty-state">No active rooms yet. Click "Start Hosting Current Place" in the Roblox Studio plugin to create a room.</div>'
+
+        guest_rows = []
+        for guest in guests_list:
+            if guest["active"]:
+                badge = '<span class="badge" style="padding:2px 8px;font-size:11px"><span class="dot"></span> Online</span>'
+            else:
+                badge = '<span style="color:var(--muted);font-size:12px">Idle</span>'
+            guest_rows.append(f"""<tr>
+              <td><strong>{escape(str(guest['name']))}</strong></td>
+              <td>{badge}</td>
+            </tr>""")
+        guest_rows = "".join(guest_rows)
+        guest_table = f'''<table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {guest_rows}
+      </tbody>
+    </table>''' if guests_list else '<div class="empty-state">No guests registered. Connect via the Roblox Studio PlaceTogether plugin.</div>'
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -768,48 +822,14 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
     <div class="section-header">
       <h2>Collaborative Rooms</h2>
     </div>
-    {f'''<table>
-      <thead>
-        <tr>
-          <th>Room Name</th>
-          <th>Room ID</th>
-          <th>Revision</th>
-          <th>Objects</th>
-          <th>Active Peers</th>
-          <th>Export</th>
-        </tr>
-      </thead>
-      <tbody>
-        {''.join(f"""<tr>
-          <td><strong>{escape(str(r['name']))}</strong><br><span style="color:var(--muted);font-size:12px">Host: {escape(str(r['owner']))}</span></td>
-          <td><code>{escape(str(r['id']))}</code></td>
-          <td><span style="color:var(--green)">rev {r['revision']}</span></td>
-          <td>{r['objects']:,}</td>
-          <td>{''.join(f'<span class="peer-pill">{escape(str(p))}</span>' for p in r['peers']) if r['peers'] else '<span style="color:var(--muted)">Idle</span>'}</td>
-          <td><a class="btn" href="/api/rooms/{escape(str(r['id']))}/export" download>📥 Download JSON</a></td>
-        </tr>""" for r in rooms_list)}
-      </tbody>
-    </table>''' if rooms_list else '<div class="empty-state">No active rooms yet. Click "Start Hosting Current Place" in the Roblox Studio plugin to create a room.</div>'}
+    {room_table}
   </div>
 
   <div class="section">
     <div class="section-header">
       <h2>Recent Guests & Peers</h2>
     </div>
-    {f'''<table>
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Status</th>
-        </tr>
-      </thead>
-      <tbody>
-        {''.join(f"""<tr>
-          <td><strong>{escape(str(g['name']))}</strong></td>
-          <td>{'<span class="badge" style="padding:2px 8px;font-size:11px"><span class="dot"></span> Online</span>' if g['active'] else '<span style="color:var(--muted);font-size:12px">Idle</span>'}</td>
-        </tr>""" for g in guests_list)}
-      </tbody>
-    </table>''' if guests_list else '<div class="empty-state">No guests registered. Connect via the Roblox Studio PlaceTogether plugin.</div>'}
+    {guest_table}
   </div>
 </div>
 <script>
