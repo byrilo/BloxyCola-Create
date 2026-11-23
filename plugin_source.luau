@@ -1648,9 +1648,9 @@ local function capture(obj, key)
 		p.PivotOffset = encode(obj.PivotOffset)
 		p.Position, p.Orientation, p.Rotation = nil, nil, nil
 	end
-	if obj:IsA("Model") and not p.WorldPivot then
-		local ok, piv = pcall(obj.GetPivot, obj)
-		if ok then p.WorldPivot = encode(piv) end
+	if obj:IsA("Model") then
+		-- WorldPivot is ignored by Roblox when a PrimaryPart controls the pivot.
+		p.WorldPivot = not obj.PrimaryPart and encode(obj:GetPivot()) or nil
 	end
 	if obj:IsA("LuaSourceContainer") then
 		local ok, text = pcall(Editor.GetEditorSource, Editor, obj)
@@ -2317,13 +2317,12 @@ local function applyRemoteRecords(remote, force)
 					if name == "Source" and obj:IsA("LuaSourceContainer") then
 						applyScriptSourceWithCursorPreservation(obj, key, value)
 					elseif obj:IsA("Model") and (name == "CFrame" or name == "WorldPivot") then
+						-- Parts already carry absolute CFrames. Moving this model here
+						-- would also move children whose records have not changed.
 						local cf = decode(value)
-						if typeof(cf) == "CFrame" and not equal(encode(obj:GetPivot()), value) then
-							if force then
-								if name == "WorldPivot" and not obj.PrimaryPart then obj.WorldPivot = cf end
-							else
-								obj:PivotTo(cf)
-							end
+						if name == "WorldPivot" and typeof(cf) == "CFrame" and not obj.PrimaryPart
+							and obj.WorldPivot ~= cf then
+							obj.WorldPivot = cf
 						end
 					elseif obj:IsA("BasePart") and name == "CFrame" then
 						local cf = decode(value)
