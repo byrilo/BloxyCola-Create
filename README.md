@@ -4,7 +4,7 @@
 
 **Своя комната для совместной работы в Roblox Studio.** Редактируйте карту и скрипты через собственный сервер, затем приглашайте команду на плейтест.
 
-[Скачать v0.1.0 для Windows](https://github.com/byrilo/BloxyCola-Create/releases/download/v0.1.0/BloxyCola-Create-v0.1.0-windows.zip) · [Релизы](https://github.com/byrilo/BloxyCola-Create/releases) · [Сообщить об ошибке](https://github.com/byrilo/BloxyCola-Create/issues/new?template=bug.yml)
+[Скачать v0.1.1 для Windows](https://github.com/byrilo/BloxyCola-Create/releases/download/v0.1.1/BloxyCola-Create-v0.1.1-windows.zip) · [Релизы](https://github.com/byrilo/BloxyCola-Create/releases) · [Сообщить об ошибке](https://github.com/byrilo/BloxyCola-Create/issues/new?template=bug.yml)
 
 [![Тесты сервера](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/byrilo/BloxyCola-Create/actions/workflows/ci.yml)
 
