@@ -2619,10 +2619,13 @@ function undoControls.plan(batch, current)
 end
 -- PERSONAL UNDO END
 
-local function sendChanges(current)
+local function sendChanges(current, skipIdleFetch)
 	if restoringRemoteHistory then error("Waiting for Studio to restore a synchronized edit") end
 	local list = changes(current)
 	diagnostics.queue = #list
+	if #list == 0 and skipIdleFetch then
+		return {revision = currentRevision, objects = {}, localOnly = true}
+	end
 	if #list > 0 then
 		local result = request("POST", {changes = list, since = currentRevision, rebase = true})
 		if not result.conflict then
@@ -3808,27 +3811,102 @@ end)
 task.spawn(function()
 	while true do
 		if active and diagnostics.lastSync then
-			diagnostics.sync.Text = string.format("Synced %ds ago · HTTP %d ms · Last batch pending: %d",
+			diagnostics.sync.Text = string.format("%s · Synced %ds ago · HTTP %d ms · Pending: %d",
+				diagnostics.revisions and diagnostics.revisions.lastMessage > 0 and "SSE" or "Polling",
 				os.time() - diagnostics.lastSync, diagnostics.requestMs or 0, diagnostics.queue or 0)
 		end
 		task.wait(1)
 	end
 end)
 
--- Keep the interval between sync starts close to 150 ms, including request time.
+diagnostics.revisions = {connections = {}, retryAt = 0, latest = 0, lastMessage = 0}
+
+function diagnostics.revisions.close()
+	local stream = diagnostics.revisions
+	local client = stream.client
+	stream.client = nil
+	stream.latest, stream.lastMessage = 0, 0
+	for _, connection in ipairs(stream.connections) do connection:Disconnect() end
+	table.clear(stream.connections)
+	if client then pcall(client.Close, client) end
+end
+
+function diagnostics.revisions.update()
+	local stream = diagnostics.revisions
+	local url = active and not inPlaytest() and endpoint or nil
+	local secret = serverSecret.Text
+	if stream.endpoint ~= url or stream.token ~= credential or stream.secret ~= secret then
+		stream.close()
+		stream.endpoint, stream.token, stream.secret = url, credential, secret
+		stream.retryAt = 0
+	end
+	if not url then return end
+	local now = os.clock()
+	if stream.client then
+		local lastActivity = stream.lastMessage > 0 and stream.lastMessage or stream.started
+		if now - lastActivity < 12 then return end
+		stream.close()
+		stream.retryAt = now + 10
+	end
+	if now < stream.retryAt then return end
+	stream.retryAt = now + 10
+	local ok, client = pcall(function()
+		return Http:CreateWebStreamClient(Enum.WebStreamClientType.SSE, {
+			Url = (url:gsub("/sync$", "/events")),
+			Method = "GET",
+			Headers = {
+				Accept = "text/event-stream",
+				Authorization = "Bearer "..credential,
+				["X-PT-Secret"] = secret,
+				["bypass-tunnel-reminder"] = "true",
+			},
+		})
+	end)
+	if not ok or not client then return end
+	stream.client, stream.started = client, now
+	local function disconnected()
+		if stream.client ~= client then return end
+		stream.close()
+		stream.retryAt = os.clock() + 10
+	end
+	table.insert(stream.connections, client.MessageReceived:Connect(function(message)
+		if stream.client ~= client then return end
+		local revision = tonumber(message) or tonumber(message:match("^data:%s*(%d+)%s*$"))
+		if revision then
+			stream.latest = revision
+			stream.lastMessage = os.clock()
+		end
+	end))
+	table.insert(stream.connections, client.Closed:Connect(disconnected))
+	table.insert(stream.connections, client.Error:Connect(disconnected))
+end
+
+-- Keep local scans at 150 ms, but fetch remote revisions as soon as the stream reports them.
 task.spawn(function()
 	local backoff = 0
 	local lastTick = os.clock()
+	local lastFetch = 0
+	local stream = diagnostics.revisions
 	while true do
-		task.wait(math.max(0.03, 0.15 - (os.clock() - lastTick)) + backoff)
+		repeat
+			task.wait(stream.lastMessage > 0 and 0.02 or 0.05)
+			stream.update()
+		until os.clock() - lastTick >= 0.15 + backoff
+			or (backoff == 0 and active and not busy and stream.latest > currentRevision
+				and os.clock() - lastTick >= 0.03)
 		lastTick = os.clock()
 		if active and not busy and not inPlaytest() then
 			busy = true
 			diagnostics.backgroundSync = true
 			local ok, err = pcall(function()
 				local current = snapshot(false)
-				local state = sendChanges(current)
-				diagnostics.lastSync = os.time()
+				local skipIdleFetch = stream.lastMessage > 0 and stream.latest <= currentRevision
+					and os.clock() - lastFetch < 2
+				local state = sendChanges(current, skipIdleFetch)
+				if not state.localOnly then
+					lastFetch = os.clock()
+					diagnostics.lastSync = os.time()
+				end
 				status(
 					(warnings.syncConflict and "Unsent changes pending" or ("Live · Rev "..state.revision))
 					.. " · Room " .. room.Text:sub(1, 8)
@@ -3854,6 +3932,7 @@ task.spawn(function()
 end)
 
 plugin.Unloading:Connect(function()
+	diagnostics.revisions.close()
 	if active and not busy and not inPlaytest() then
 		busy = true
 		pcall(function()
