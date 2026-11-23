@@ -3304,6 +3304,7 @@ local function refreshSavesAndBackupsUI()
 end
 
 local unreadChatCount = 0
+local roomChat = {seen = {}, recentIds = {}, cursor = ""}
 local followingPeerId = nil
 local localActivePing = nil
 
@@ -3392,6 +3393,27 @@ local function appendChatMessage(msg)
 	end
 end
 
+function roomChat.select(roomId, server)
+	if roomChat.room == roomId and roomChat.server == server then return end
+	roomChat.room, roomChat.server = roomId, server
+	roomChat.cursor = ""
+	table.clear(roomChat.seen)
+	table.clear(roomChat.recentIds)
+	for _, child in ipairs(chatMessagesFrame:GetChildren()) do
+		if child:IsA("Frame") then child:Destroy() end
+	end
+	unreadChatCount = 0
+	updateChatTabBadge()
+end
+
+function roomChat.display(message)
+	if type(message) ~= "table" or type(message.id) ~= "string" or roomChat.seen[message.id] then return end
+	appendChatMessage(message)
+	roomChat.seen[message.id] = true
+	table.insert(roomChat.recentIds, message.id)
+	if #roomChat.recentIds > 400 then roomChat.seen[table.remove(roomChat.recentIds, 1)] = nil end
+end
+
 local function sendChatMessage()
 	local raw = chatInput.Text
 	local trimmed = raw:match("^%s*(.-)%s*$")
@@ -3406,7 +3428,12 @@ local function sendChatMessage()
 		local ok, res = pcall(function()
 			return api("/rooms/"..roomId.."/chat", "POST", {text = trimmed})
 		end)
-		if active and room.Text == roomId and base() == server and (not ok or not res or not res.message) then
+		if not active or room.Text ~= roomId or base() ~= server then return end
+		if ok and res and res.message then
+			roomChat.select(roomId, server)
+			roomChat.display(res.message)
+		else
+			if chatInput.Text == "" then chatInput.Text = trimmed end
 			setNotice("Could not send the chat message.")
 		end
 	end)
@@ -3620,38 +3647,19 @@ playtestCard.clear.Activated:Connect(function() playtestCard.updateInvitation(""
 
 -- Chat background polling loop
 task.spawn(function()
-	local chatRoom, chatServer
-	local lastChatId = ""
-	local seen = {}
-	local recentIds = {}
 	while true do
 		if active and loggedIn and not inPlaytest() and room.Text ~= "" then
-			pcall(function()
-				local roomId, server = room.Text, base()
-				if chatRoom ~= roomId or chatServer ~= server then
-					chatRoom, chatServer = roomId, server
-					lastChatId = ""
-					table.clear(seen)
-					table.clear(recentIds)
-					clearContainerChildren(chatMessagesFrame)
-					unreadChatCount = 0
-					updateChatTabBadge()
+			local roomId, server = room.Text, base()
+			roomChat.select(roomId, server)
+			local query = roomChat.cursor ~= "" and ("?since="..Http:UrlEncode(roomChat.cursor)) or ""
+			local ok, res = pcall(api, "/rooms/"..roomId.."/chat"..query, "GET")
+			if ok and active and room.Text == roomId and base() == server then
+				for _, message in ipairs(res.messages or {}) do
+					roomChat.display(message)
+					if type(message.id) == "string" then roomChat.cursor = message.id end
 				end
-				local res = api("/rooms/"..roomId.."/chat"..(lastChatId ~= "" and ("?since="..lastChatId) or ""), "GET")
-				if not active or room.Text ~= roomId or base() ~= server then return end
 				playtestCard.showInvitation(res.playtest)
-				if res and res.messages then
-					for _, msg in ipairs(res.messages) do
-						lastChatId = msg.id
-						if not seen[msg.id] then
-							seen[msg.id] = true
-							table.insert(recentIds, msg.id)
-							if #recentIds > 200 then seen[table.remove(recentIds, 1)] = nil end
-							appendChatMessage(msg)
-						end
-					end
-				end
-			end)
+			end
 		else
 			playtestCard.showInvitation(nil)
 		end
