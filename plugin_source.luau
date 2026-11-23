@@ -793,6 +793,7 @@ local pending = {}
 local meshRetry = {}
 local referenceRetry = {}
 local appearanceRetry = {}
+diagnostics.recordRetries = {}
 local warnings = {}
 
 -- Smooth 60FPS CFrame interpolation state for remote moving objects
@@ -1858,6 +1859,7 @@ local function index()
 	meshRetry = {}
 	referenceRetry = {}
 	appearanceRetry = {}
+	table.clear(diagnostics.recordRetries)
 	warnings = {}
 	terrainReset()
 
@@ -2154,7 +2156,7 @@ end
 local function applyRemoteRecords(remote, force)
 	local changed = {}
 	for key, record in pairs(remote) do
-		if force or versions[key] ~= record.version or pending[key] or meshRetry[key] or referenceRetry[key] or (appearanceRetry[key] and appearanceRetry[key] <= os.clock()) then
+		if force or versions[key] ~= record.version or diagnostics.recordRetries[key] then
 			changed[key] = {
 				version = record.version,
 				remoteValue = record.value,
@@ -2485,22 +2487,32 @@ local function applyRemoteRecords(remote, force)
 			end
 		end
 		dirtyKeys[key] = nil
+		local obj = objects[key]
+		local expected = r.value and r.value.props and r.value.props.CFrame
+		local positionMismatch = obj and obj:IsA("BasePart") and expected
+			and not equal(encode(obj.CFrame), expected)
+		local warningKey = key..":placement"
+		if positionMismatch then
+			recordWarning(warningKey, r.value.name..": position differs from the room")
+		else
+			warnings[warningKey] = nil
+		end
+
+		local retry = r.remoteValue and (positionMismatch or pending[key] or meshRetry[key]
+			or referenceRetry[key] or appearanceRetry[key] or not isValidInHierarchy(obj, key))
+			and isSceneRecord(key, r)
+		if retry then
+			diagnostics.recordRetries[key] = {
+				record = {value = r.remoteValue, version = r.version},
+				due = math.max(os.clock() + 1, meshRetry[key] or 0, appearanceRetry[key] or 0),
+			}
+		else
+			diagnostics.recordRetries[key] = nil
+		end
+
 		if force and isSceneRecord(key, r) then
 			finalized += 1
-			local obj = objects[key]
-			local expected = r.value.props and r.value.props.CFrame
-			local positionMismatch = obj and obj:IsA("BasePart") and expected
-				and not equal(encode(obj.CFrame), expected)
-			local warningKey = key..":placement"
-			if positionMismatch then
-				recordWarning(warningKey, r.value.name..": position differs from the room after import")
-			else
-				warnings[warningKey] = nil
-			end
-			if positionMismatch or pending[key] or meshRetry[key] or referenceRetry[key] or appearanceRetry[key]
-				or not isValidInHierarchy(objects[key], key) then
-				incomplete += 1
-			end
+			if retry then incomplete += 1 end
 		end
 		checkYield("Finishing map import", finalized, objectCount)
 	end
@@ -2525,7 +2537,7 @@ local function apply(remote, _, force)
 end
 
 local function blocked(obj, key)
-	if pending[key] then return true end
+	if pending[key] or diagnostics.recordRetries[key] then return true end
 	if not obj then return false end
 	local parent = obj.Parent
 	while parent and parent ~= game do
@@ -2546,7 +2558,7 @@ local function changes(current)
 		end
 	end
 	for key in pairs(baseline) do
-		if not seen[key] and not pending[key] then
+		if not seen[key] and not pending[key] and not diagnostics.recordRetries[key] then
 			table.insert(list, {id = key, version = versions[key] or 0, deleted = true})
 		end
 	end
@@ -2661,6 +2673,18 @@ end
 
 local function sendChanges(current, skipIdleFetch)
 	if restoringRemoteHistory then error("Waiting for Studio to restore a synchronized edit") end
+	if active and next(diagnostics.recordRetries) then
+		local retries, count = {}, 0
+		local now = os.clock()
+		for key, item in pairs(diagnostics.recordRetries) do
+			if now >= item.due then
+				retries[key] = item.record
+				count += 1
+				if count >= 12 then break end
+			end
+		end
+		if count > 0 then apply(retries, current, false) end
+	end
 	local list = changes(current)
 	diagnostics.queue = #list
 	if #list == 0 and skipIdleFetch then
