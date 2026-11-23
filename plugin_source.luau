@@ -2631,15 +2631,28 @@ function undoControls.applyLatest()
 	return "The room is still syncing. Select Undo again after it catches up."
 end
 
-function undoControls.undo()
+function undoControls.undo(useStudioHistory)
 	if undoControls.requested then return end
 	undoControls.message.Visible = true
-	if not active then
-		undoControls.message.Text = "Connect to a room to undo your changes."
-		return
-	end
 	if inPlaytest() then
 		undoControls.message.Text = "Stop the playtest before undoing."
+		return
+	end
+
+	if not active then
+		if not useStudioHistory then
+			undoControls.message.Text = "Connect to a room to undo your changes."
+			return
+		end
+		undoControls.requested = true
+		local ok, undone = pcall(function()
+			if not History:GetCanUndo() then return false end
+			History:Undo()
+			return true
+		end)
+		undoControls.requested = false
+		undoControls.message.Text = ok and (undone and "Undid the last Studio edit." or "Studio has nothing to undo.")
+			or ("Studio undo failed: "..tostring(undone))
 		return
 	end
 
@@ -2664,12 +2677,14 @@ function undoControls.undo()
 	undoControls.requested = false
 end
 
-undoControls.button.Activated:Connect(undoControls.undo)
+undoControls.button.Activated:Connect(function() undoControls.undo(false) end)
 undoControls.help.Activated:Connect(function()
 	undoControls.instructions.Visible = not undoControls.instructions.Visible
 end)
 plugin:CreatePluginAction("BloxyColaUndoMyChange", "BloxyCola: Undo my change",
-	"Undo your latest synced change batch", "", true).Triggered:Connect(undoControls.undo)
+	"Undo your latest synced change batch or use Studio history offline", "", true).Triggered:Connect(function()
+	undoControls.undo(true)
+end)
 
 -- ============================================================
 -- SESSION & NETWORK MANAGEMENT
