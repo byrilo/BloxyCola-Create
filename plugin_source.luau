@@ -2170,6 +2170,9 @@ local function applyRemoteRecords(remote, force)
 		for key in pairs(terrainCache) do
 			if remote[key] == nil then changed[key] = {version = currentRevision} end
 		end
+		for key in pairs(diagnostics.recordRetries) do
+			if remote[key] == nil then changed[key] = {version = currentRevision} end
+		end
 		for key, obj in pairs(objects) do
 			if not serviceIds[key] and remote[key] == nil then
 				changed[key] = {version = currentRevision, value = nil}
@@ -2319,6 +2322,9 @@ local function applyRemoteRecords(remote, force)
 		local obj = objects[key]
 		if not v then
 			appearanceRetry[key] = nil
+			if not obj then
+				pending[key], meshRetry[key], referenceRetry[key] = nil, nil, nil
+			end
 		end
 		if v and obj and not pending[key] then
 			referenceRetry[key] = nil
@@ -2745,6 +2751,9 @@ local function sendChanges(current, skipIdleFetch)
 	else
 		apply(latest.objects, current, true)
 		table.clear(undoControls.history)
+		if #list > 0 then
+			recordWarning("roomRefresh", "Pending edits were replaced by the server snapshot after a revision reset")
+		end
 	end
 
 	currentRevision = latest.revision
