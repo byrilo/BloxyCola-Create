@@ -2167,9 +2167,17 @@ local function applyRemoteRecords(remote, force)
 	end
 
 	-- 4. Apply Properties, Attributes, Tags, or Deletions
+	local propertyOrder = table.clone(parentOrder)
+	for key, record in pairs(changed) do
+		if not record.value or not objects[key] then
+			table.insert(propertyOrder, {key = key, r = record})
+		end
+	end
+	local deferredLinks = {}
 	local processedObjects = 0
 	checkYield("Applying object properties", processedObjects, objectCount)
-	for key, r in pairs(changed) do
+	for _, item in ipairs(propertyOrder) do
+		local key, r = item.key, item.r
 		local v = r.value
 		local obj = objects[key]
 		if not v then
@@ -2181,7 +2189,12 @@ local function applyRemoteRecords(remote, force)
 			loadMesh(obj, key, v)
 			local values = {}
 			for name, value in pairs(v.props) do
-				if not (obj:IsA("MeshPart") and (name == "MeshId" or name == "MeshContent" or name == "CollisionFidelity" or name == "RenderFidelity" or name == "FluidFidelity")) then
+				local partLink = (name == "Part0" or name == "Part1")
+					and (obj:IsA("JointInstance") or obj:IsA("WeldConstraint"))
+				local attachmentLink = (name == "Attachment0" or name == "Attachment1") and obj:IsA("Constraint")
+				if force and (partLink or attachmentLink) then
+					table.insert(deferredLinks, {obj = obj, key = key, name = name, value = value})
+				elseif not (obj:IsA("MeshPart") and (name == "MeshId" or name == "MeshContent" or name == "CollisionFidelity" or name == "RenderFidelity" or name == "FluidFidelity")) then
 					table.insert(values, {name, value})
 				end
 			end
@@ -2211,7 +2224,11 @@ local function applyRemoteRecords(remote, force)
 					elseif obj:IsA("Model") and (name == "CFrame" or name == "WorldPivot") then
 						local cf = decode(value)
 						if typeof(cf) == "CFrame" and not equal(encode(obj:GetPivot()), value) then
-							obj:PivotTo(cf)
+							if force then
+								if name == "WorldPivot" and not obj.PrimaryPart then obj.WorldPivot = cf end
+							else
+								obj:PivotTo(cf)
+							end
 						end
 					elseif obj:IsA("BasePart") and name == "CFrame" then
 						local cf = decode(value)
@@ -2275,6 +2292,22 @@ local function applyRemoteRecords(remote, force)
 		end
 		if force and isSceneRecord(key, r) then processedObjects += 1 end
 		checkYield("Applying object properties", processedObjects, objectCount)
+	end
+
+	for index, link in ipairs(deferredLinks) do
+		local ok = pcall(function()
+			local target = decode(link.value)
+			if link.value.t == "Instance" and not target then error("Linked instance still loading") end
+			if link.obj[link.name] ~= target then link.obj[link.name] = target end
+		end)
+		local warningKey = link.key..":"..link.name
+		if ok then
+			warnings[warningKey] = nil
+		else
+			referenceRetry[link.key] = true
+			recordWarning(warningKey, link.obj.Name.."."..link.name..": unavailable via API")
+		end
+		checkYield("Connecting parts", index, #deferredLinks)
 	end
 
 	-- 5. Apply Terrain chunks
