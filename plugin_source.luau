@@ -743,6 +743,7 @@ local busy = false
 local restoreSuppressed = false
 local applyingRemote = false
 local remoteHistoryName = "PlaceTogether.RemoteSync"
+local studioEditInProgress = "Waiting for Studio to finish the current edit"
 local restoringRemoteHistory = false
 
 History.OnUndo:Connect(function(waypoint)
@@ -1726,7 +1727,13 @@ local function setupRootWatchers()
 		local svc = game:GetService(name)
 		table.insert(rootConnections, svc.DescendantAdded:Connect(function(obj)
 			if applyingRemote then return end
-			registerNewObject(obj)
+			local key = ids[obj]
+			if key then
+				watchObject(obj, key)
+				dirtyKeys[key] = true
+			else
+				registerNewObject(obj)
+			end
 		end))
 		table.insert(rootConnections, svc.DescendantRemoving:Connect(function(obj)
 			if applyingRemote then return end
@@ -2401,7 +2408,7 @@ end
 
 local function apply(remote, _, force)
 	local recording = History:TryBeginRecording(remoteHistoryName)
-	if not recording then error("Waiting for Studio to finish the current edit") end
+	if not recording then error(studioEditInProgress, 0) end
 	local ok, err = pcall(applyRemoteRecords, remote, force)
 	applyingRemote = false
 	History:FinishRecording(recording, Enum.FinishRecordingOperation.Commit)
@@ -3754,6 +3761,9 @@ task.spawn(function()
 			busy = false
 			if ok then
 				backoff = 0
+			elseif err == studioEditInProgress then
+				backoff = 0
+				status(studioEditInProgress)
 			else
 				-- Server unreachable or overloaded: slow down instead of hammering it at 6.6 Hz.
 				backoff = math.min(backoff > 0 and backoff * 2 or 0.5, 5)
