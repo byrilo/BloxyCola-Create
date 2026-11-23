@@ -53,6 +53,7 @@ end
 local toolbar = plugin:CreateToolbar("BloxyCola Create")
 local button = toolbar:CreateButton("PlaceTogether", "Open BloxyCola Create", "")
 local teamTestToolbarBtn = toolbar:CreateButton("TeamTest", "Show Roblox playtest options", "")
+teamTestToolbarBtn.ClickableWhenViewportHidden = true
 local widget = plugin:CreateDockWidgetPluginGuiAsync(
 	"PlaceTogetherInvites03",
 	DockWidgetPluginGuiInfo.new(Enum.InitialDockState.Right, false, false, 360, 580, 300, 420)
@@ -448,9 +449,14 @@ local ttActiveUsersLabel
 local toggleTeamTestBtn
 local playtestCard
 do
-	local teamTestCard = card(homePanel, "TeamTestCard")
+	local open = makeButton("Playtest with friends", homePanel)
+	local panel = container(body, "TeamTest")
+	panel.Visible = false
+	local teamTestCard = card(panel, "TeamTestCard")
 	title("Playtest with friends", teamTestCard)
 	playtestCard = {
+		open = open,
+		panel = panel,
 		prepare = makeButton("Sync place before publishing", teamTestCard),
 		submit = field("Paste Roblox private server link", "", teamTestCard),
 	}
@@ -813,6 +819,7 @@ end
 
 local function refreshUI(isActive, isLoggedIn, hasInbox, isBusy)
 	homePanel.Visible = (uiTab == "home")
+	playtestCard.panel.Visible = (uiTab == "playtest")
 	chatPanel.Visible = (uiTab == "chat")
 	savesPanel.Visible = (uiTab == "saves")
 	settingsPanel.Visible = (uiTab == "settings")
@@ -4358,11 +4365,15 @@ function TT.toggle()
 end
 
 toggleTeamTestBtn.MouseButton1Click:Connect(TT.toggle)
-teamTestToolbarBtn.Click:Connect(function()
-	uiTab = "home"
+function playtestCard.openPanel()
+	uiTab = "playtest"
 	widget.Enabled = true
 	refreshUI(active, loggedIn, inbox ~= nil, (busy and not diagnostics.backgroundSync) or inviting)
-end)
+	body.CanvasPosition = Vector2.zero
+end
+
+teamTestToolbarBtn.Click:Connect(playtestCard.openPanel)
+playtestCard.open.Activated:Connect(playtestCard.openPanel)
 
 function playtestCard.preparePlace()
 	if busy or inPlaytest() then return false end
