@@ -1193,7 +1193,8 @@ end
 -- ============================================================
 local terrainCache = {}
 local terrainKnown = {}
-local terrainScanned = {} -- Prevents re-reading empty air chunks around camera every tick!
+local terrainScanned = {}
+local terrainTracking = {captured = {}, edited = {}, scanIndex = 0}
 local CHUNK, VOXELS = 64, 16
 
 local function terrainKey(x, y, z)
@@ -1277,6 +1278,9 @@ local function terrainReset()
 	terrainCache = {}
 	terrainKnown = {}
 	terrainScanned = {}
+	table.clear(terrainTracking.captured)
+	table.clear(terrainTracking.edited)
+	terrainTracking.scanIndex = 0
 	dirtyTerrainChunks = {}
 end
 
@@ -1305,7 +1309,7 @@ pcall(function()
 end)
 
 local function terrainRecords()
-	-- Incrementally discover un-scanned chunks around camera (max 6 per tick to keep frame time < 0.5ms)
+	-- Discover nearby terrain, and rescan it in steps when Studio does not report brush edits.
 	pcall(function()
 		local cam = workspace.CurrentCamera
 		if cam and cam.Focus then
@@ -1315,6 +1319,15 @@ local function terrainRecords()
 			local cz = math.floor(p.Z / CHUNK) * CHUNK
 			local radius = CHUNK
 			local added = 0
+			local scanIndex = terrainTracking.scanIndex
+			for offset = 0, 3 do
+				local i = (scanIndex + offset) % 27
+				local x = cx + (i % 3 - 1) * CHUNK
+				local y = cy + (math.floor(i / 3) % 3 - 1) * CHUNK
+				local z = cz + (math.floor(i / 9) - 1) * CHUNK
+				dirtyTerrainChunks[terrainKey(x, y, z)] = {x, y, z}
+			end
+			terrainTracking.scanIndex = (scanIndex + 4) % 27
 			for x = cx - radius, cx + radius, CHUNK do
 				for y = cy - radius, cy + radius, CHUNK do
 					for z = cz - radius, cz + radius, CHUNK do
@@ -1336,6 +1349,10 @@ local function terrainRecords()
 		for key, origin in pairs(dirtyTerrainChunks) do
 			local ok, value = pcall(readTerrain, origin)
 			if ok then
+				if active and terrainTracking.captured[key] and not equal(terrainCache[key], value) then
+					terrainTracking.edited[key] = true
+				end
+				terrainTracking.captured[key] = true
 				terrainCache[key] = value
 				if value or terrainKnown[key] then
 					terrainKnown[key] = origin
@@ -1353,13 +1370,16 @@ end
 local function applyTerrain(key, value)
 	local origin = value and value.props and value.props.origin or terrainKnown[key]
 	if not origin then return end
+	local wasApplying = applyingRemote
 	applyingRemote = true
 	local ok, err = pcall(function()
 		if #origin ~= 3 then error("Invalid Terrain position") end
 		writeTerrain(origin, value and value.props.runs or {{"Air", 0, 0, 4096}})
 	end)
-	applyingRemote = false
+	applyingRemote = wasApplying
 	if ok then
+		terrainTracking.captured[key] = true
+		terrainTracking.edited[key] = nil
 		terrainKnown[key] = origin
 		terrainScanned[key] = true
 		terrainCache[key] = copy(value)
@@ -2453,7 +2473,7 @@ end
 
 function undoControls.inverse(entry, current)
 	local before, after = entry.before, entry.after
-	if not before or not after or not current then
+	if not before or not after or not current or after.class == "PTTerrainChunk" then
 		if equal(current, after) then return copy(before) end
 		return current
 	end
@@ -2542,9 +2562,11 @@ local function sendChanges(current)
 
 			local batch = {}
 			for _, ch in ipairs(list) do
-				if active and ch.id:sub(1, 9) ~= "~Terrain/" then
+				local terrain = ch.id:sub(1, 9) == "~Terrain/"
+				if active and (not terrain or terrainTracking.edited[ch.id]) then
 					batch[ch.id] = {before = copy(baseline[ch.id]), after = copy(ch.value)}
 				end
+				if terrain then terrainTracking.edited[ch.id] = nil end
 				if ch.deleted then
 					baseline[ch.id] = nil
 					cachedSnapshot[ch.id] = nil
