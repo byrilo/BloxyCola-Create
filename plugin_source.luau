@@ -3810,11 +3810,13 @@ task.spawn(function()
 	end
 end)
 
--- High-frequency incremental sync loop (0.15s = ~6.6 Hz, O(dirty) overhead < 0.05ms)
+-- Keep the interval between sync starts close to 150 ms, including request time.
 task.spawn(function()
 	local backoff = 0
+	local lastTick = os.clock()
 	while true do
-		task.wait(0.15 + backoff)
+		task.wait(math.max(0.03, 0.15 - (os.clock() - lastTick)) + backoff)
+		lastTick = os.clock()
 		if active and not busy and not inPlaytest() then
 			busy = true
 			diagnostics.backgroundSync = true
