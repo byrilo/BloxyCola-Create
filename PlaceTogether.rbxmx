@@ -395,6 +395,9 @@ do
 	sessionStats.TextSize = 11
 	diagnostics.sync = textLabel("Waiting for first sync", 18, sessionCard)
 	diagnostics.sync.TextSize = 11
+	diagnostics.importResult = textLabel("", 18, sessionCard)
+	diagnostics.importResult.TextWrapped = true
+	diagnostics.importResult.Visible = false
 
 	participantsText = textLabel("Participants will appear once connected.", 20, sessionCard)
 	participantsText.TextColor3 = palette.subtle
@@ -1750,6 +1753,7 @@ end
 local function index()
 	diagnostics.lastSync, diagnostics.requestMs, diagnostics.queue = nil, nil, nil
 	diagnostics.sync.Text = "Waiting for first sync"
+	diagnostics.importResult.Visible = false
 	saveFeedback.Visible = false
 	undoControls.history = {}
 	undoControls.message.Visible = false
@@ -2043,12 +2047,28 @@ local function applyRemoteRecords(remote, force)
 		end
 	end
 
+	local function isSceneRecord(key, record)
+		return record.value ~= nil and record.value.class ~= "PTTerrainChunk" and not serviceIds[key]
+	end
+
+	local objectCount, terrainCount = 0, 0
+	if force then
+		for key, record in pairs(changed) do
+			if isSceneRecord(key, record) then objectCount += 1 end
+			if key:sub(1, 9) == "~Terrain/" then terrainCount += 1 end
+		end
+	end
+
 	applyingRemote = true
 	local frameBudgetStart = os.clock()
-	local function checkYield(label)
-		if force and (os.clock() - frameBudgetStart > 0.014) then
+	local function checkYield(label, processed, total)
+		if not force then return end
+		local yieldForFrame = (os.clock() - frameBudgetStart > 0.014)
+		if (yieldForFrame or processed == 0) and total > 0 then
+			status(string.format("%s · %d / %d", label, processed, total))
+		end
+		if yieldForFrame then
 			applyingRemote = false
-			status(label or "Synchronizing place...")
 			task.wait()
 			applyingRemote = true
 			frameBudgetStart = os.clock()
@@ -2056,6 +2076,8 @@ local function applyRemoteRecords(remote, force)
 	end
 
 	-- 1. Instantiate missing objects
+	local prepared = 0
+	checkYield("Preparing objects", prepared, objectCount)
 	for key, r in pairs(changed) do
 		if r.value and r.value.class ~= "PTTerrainChunk" and not objects[key] then
 			local ok, obj = pcall(Instance.new, r.value.class)
@@ -2075,8 +2097,9 @@ local function applyRemoteRecords(remote, force)
 				pending[key] = true
 				recordWarning(key..":create", r.value.name..": class cannot be created via API")
 			end
-			checkYield("Creating objects...")
 		end
+		if force and isSceneRecord(key, r) then prepared += 1 end
+		checkYield("Preparing objects", prepared, objectCount)
 	end
 
 	-- 2. Sort hierarchy by parent chain depth so parents are always parented before children
@@ -2107,7 +2130,8 @@ local function applyRemoteRecords(remote, force)
 	end
 	table.sort(parentOrder, function(a, b) return a.depth < b.depth end)
 
-	for _, item in ipairs(parentOrder) do
+	checkYield("Assembling hierarchy", 0, #parentOrder)
+	for processed, item in ipairs(parentOrder) do
 		local key, r = item.key, item.r
 		local v = r.value
 		local obj = objects[key]
@@ -2128,6 +2152,7 @@ local function applyRemoteRecords(remote, force)
 				recordWarning(key..":parent", v.name..": waiting for parent object")
 			end
 		end
+		checkYield("Assembling hierarchy", processed, #parentOrder)
 	end
 
 	-- 3. Apply Model Scale
@@ -2147,6 +2172,8 @@ local function applyRemoteRecords(remote, force)
 	end
 
 	-- 4. Apply Properties, Attributes, Tags, or Deletions
+	local processedObjects = 0
+	checkYield("Applying object properties", processedObjects, objectCount)
 	for key, r in pairs(changed) do
 		local v = r.value
 		local obj = objects[key]
@@ -2233,7 +2260,6 @@ local function applyRemoteRecords(remote, force)
 					if not tags[tag] then Collection:RemoveTag(obj, tag) end
 				end
 			end
-			checkYield("Applying properties...")
 		elseif not v and obj and not serviceIds[key] then
 			if objConnections[obj] then
 				for _, c in ipairs(objConnections[obj]) do pcall(function() c:Disconnect() end) end
@@ -2252,16 +2278,24 @@ local function applyRemoteRecords(remote, force)
 				recordWarning(key..":delete", obj.Name..": Roblox prevented deletion")
 			end
 		end
+		if force and isSceneRecord(key, r) then processedObjects += 1 end
+		checkYield("Applying object properties", processedObjects, objectCount)
 	end
 
 	-- 5. Apply Terrain chunks
+	local processedTerrain = 0
+	checkYield("Applying terrain chunks", processedTerrain, terrainCount)
 	for key, r in pairs(changed) do
 		if key:sub(1, 9) == "~Terrain/" then
 			applyTerrain(key, r.value)
+			processedTerrain += 1
+			checkYield("Applying terrain chunks", processedTerrain, terrainCount)
 		end
 	end
 
 	-- 6. Update baseline & cachedSnapshot ONLY for affected keys (O(changed) instead of O(entire game)!)
+	local finalized, incomplete = 0, 0
+	checkYield("Finishing map import", finalized, objectCount)
 	for key, r in pairs(changed) do
 		versions[key] = r.version
 		if r.value == nil then
@@ -2284,6 +2318,22 @@ local function applyRemoteRecords(remote, force)
 			end
 		end
 		dirtyKeys[key] = nil
+		if force and isSceneRecord(key, r) then
+			finalized += 1
+			if pending[key] or meshRetry[key] or referenceRetry[key] or appearanceRetry[key]
+				or not isValidInHierarchy(objects[key], key) then
+				incomplete += 1
+			end
+		end
+		checkYield("Finishing map import", finalized, objectCount)
+	end
+	if force then
+		diagnostics.importResult.Visible = incomplete > 0
+		if incomplete > 0 then
+			diagnostics.importResult.Text = string.format("Map imported · %d/%d objects ready · %d incomplete",
+				objectCount - incomplete, objectCount, incomplete)
+			warn("BloxyCola Create: "..diagnostics.importResult.Text..warningText())
+		end
 	end
 	applyingRemote = false
 end
@@ -2790,13 +2840,17 @@ local function connectSession()
 		plugin:SetSetting("PTAddress", b)
 		plugin:SetSetting("PTRoom", room.Text)
 
+		status("Indexing the open place...")
+		task.wait()
 		index()
 		local current = snapshot(true)
+		status("Downloading room snapshot...")
 		local state = request("GET")
 		if state.unchanged or next(state.objects or {}) == nil then
 			if state.owner ~= true and state.owner ~= credential then
 				error("Host has not published the place yet")
 			end
+			status("Uploading the host map...")
 			state = sendChanges(current)
 		end
 
@@ -2824,7 +2878,7 @@ local function connectSession()
 		accept.Visible = false
 		connect.Text = "Leave Session"
 		updateSessionStatsUI()
-		status("Place connected! Real-time 60FPS sync & auto-save enabled."..warningText())
+		status(diagnostics.importResult.Visible and diagnostics.importResult.Text or "Map ready. Live synchronization enabled.")
 	end)
 	busy = false
 	if not ok then
@@ -2963,38 +3017,14 @@ local function joinExistingRoomById(targetRoomId, targetRoomName)
 	end
 	inviting = true
 	local ok, err = pcall(function()
+		status("Joining room...")
 		local joined = api("/rooms/"..targetRoomId.."/join", "POST")
 		room.Text = targetRoomId
 		sessionTitle.Text = targetRoomName or joined.name or "Studio Project"
-		index()
-		local initial = api("/rooms/"..room.Text.."/sync")
-		if initial.objects and next(initial.objects) ~= nil then
-			local defaults = {}
-			for _, obj in ipairs(workspace:GetChildren()) do
-				if obj.Name == "Baseplate" or obj:IsA("SpawnLocation") then
-					table.insert(defaults, obj)
-				end
-			end
-			connectSession()
-			connect.Visible = active
-			if not active then error(notice.Text) end
-			applyingRemote = true
-			for _, obj in ipairs(defaults) do
-				local key = ids[obj]
-				if key and not initial.objects[key] then
-					baseline[key] = nil
-					cachedSnapshot[key] = nil
-					objects[key] = nil
-					ids[obj] = nil
-					pcall(function() obj:Destroy() end)
-				end
-			end
-			applyingRemote = false
-			focusImportedPlace()
-		else
-			connectSession()
-			connect.Visible = active
-		end
+		connectSession()
+		if not active then error(notice.Text) end
+		connect.Visible = true
+		focusImportedPlace()
 		uiTab = "home"
 	end)
 	inviting = false
@@ -3044,7 +3074,7 @@ local function acceptInvitation()
 		no.Visible = false
 		inviting = false
 		joinExistingRoomById(targetId, targetName)
-		incoming.Text = "Collaborating on "..targetName.." together."
+		if active then incoming.Text = "Collaborating on "..targetName.." together." end
 	end)
 	inviting = false
 	if not ok then status(tostring(err)) end
