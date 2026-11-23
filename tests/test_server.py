@@ -414,6 +414,44 @@ class TestTombstonePruning(unittest.TestCase):
         self.assertEqual(len(room["tombstones"]), 40)
 
 
+class TestRevisionStream(ServerTestBase):
+    def open_stream(self, room_id, token):
+        request = urllib.request.Request(
+            f"{self.base}/api/rooms/{room_id}/events",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        return urllib.request.urlopen(request, timeout=2)
+
+    def read_revision(self, stream, revision):
+        self.assertEqual(stream.readline(), f"data: {revision}\n".encode("ascii"))
+        self.assertEqual(stream.readline(), b"\n")
+
+    def test_notifies_peer_and_resumes_at_latest_revision(self):
+        host = self.register("StreamHost")
+        peer = self.register("StreamPeer")
+        room_id = self.create_room(host)
+        with self.open_stream(room_id, peer) as stream:
+            self.assertEqual(stream.headers.get_content_type(), "text/event-stream")
+            self.read_revision(stream, 1)
+            status, state = self.sync(host, room_id, [{"id": "p", "value": {"name": "Part"}}], since=1)
+            self.assertEqual(status, 200)
+            self.read_revision(stream, state["revision"])
+            status, delta = self.get_sync(peer, room_id, since=1)
+            self.assertEqual(status, 200)
+            self.assertEqual(delta["objects"]["p"]["value"]["name"], "Part")
+
+        status, state = self.sync(host, room_id, [{"id": "p", "deleted": True}], since=2)
+        self.assertEqual(status, 200)
+        with self.open_stream(room_id, peer) as stream:
+            self.read_revision(stream, state["revision"])
+
+    def test_rejects_anonymous_and_unknown_room(self):
+        host = self.register("StreamAuth")
+        room_id = self.create_room(host)
+        self.assertEqual(http_json(self.base, f"/api/rooms/{room_id}/events")[0], 401)
+        self.assertEqual(http_json(self.base, "/api/rooms/missing/events", token=host)[0], 404)
+
+
 class TestServerFeatures(ServerTestBase):
     def test_gzip_compression_when_requested(self):
         # Register guest and create room with some objects so body is > 1024 bytes

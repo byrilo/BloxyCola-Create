@@ -46,6 +46,8 @@ CLIENT_REV_TTL_SECONDS = 60        # how long a peer counts as "still connected"
 
 # In-memory storage with re-entrant mutex
 lock = threading.RLock()
+revision_changed = threading.Condition(lock)
+revision_stream_slots = threading.BoundedSemaphore(64)
 PLAYTEST_INVITE_TTL = 2 * 60 * 60
 PLAYTEST_LINK = re.compile(
     r"https://(?:www\.)?roblox\.com/(?:"
@@ -88,6 +90,7 @@ def mark_dirty(room_id=None):
         last_change_time = time.time()
         if room_id and room_id in rooms:
             rooms[room_id]["updated_at"] = last_change_time
+            revision_changed.notify_all()
 
 
 def stable_hue(token):
@@ -844,6 +847,49 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    def stream_room_revisions(self, room_id, token):
+        if not self.require_guest(token):
+            return
+        with lock:
+            room = rooms.get(room_id)
+        if room is None:
+            self.send_json(404, {"error": "Room not found"})
+            return
+        if not revision_stream_slots.acquire(blocking=False):
+            self.send_json(503, {"error": "Revision streams are busy; continue polling"})
+            return
+
+        self.close_connection = True
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache, no-transform")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Connection", "close")
+            self.end_headers()
+
+            def current_revision():
+                if rooms.get(room_id) is not room or token not in guests:
+                    return None
+                return room["revision"]
+
+            previous = None
+            while True:
+                with revision_changed:
+                    revision_changed.wait_for(lambda: current_revision() != previous, timeout=5)
+                    revision = current_revision()
+                if revision is None:
+                    self.wfile.write(b"0\r\n\r\n")
+                    return
+                # Repeating the current revision also serves as a heartbeat.
+                event = f"data: {revision}\n\n".encode("ascii")
+                self.wfile.write(f"{len(event):X}\r\n".encode("ascii") + event + b"\r\n")
+                self.wfile.flush()
+                previous = revision
+        finally:
+            revision_stream_slots.release()
+
     def do_GET(self):
         path = self.path.split("?")[0]
         query_string = self.path.split("?")[1] if "?" in self.path else ""
@@ -916,6 +962,11 @@ class PlaceTogetherHandler(BaseHTTPRequestHandler):
                     })
                 res.sort(key=lambda x: x.get("updatedAt", 0), reverse=True)
                 self.send_json(200, res)
+            return
+
+        parts = path.split("/")
+        if len(parts) == 5 and parts[1:3] == ["api", "rooms"] and parts[4] == "events":
+            self.stream_room_revisions(parts[3], token)
             return
 
         # 3. Room sync GET: /api/rooms/<id>/sync with support for ?since=<rev>
