@@ -1643,6 +1643,11 @@ local function capture(obj, key)
 			end
 		end
 	end
+	if obj:IsA("BasePart") then
+		p.CFrame = encode(obj.CFrame)
+		p.PivotOffset = encode(obj.PivotOffset)
+		p.Position, p.Orientation, p.Rotation = nil, nil, nil
+	end
 	if obj:IsA("Model") and not p.WorldPivot then
 		local ok, piv = pcall(obj.GetPivot, obj)
 		if ok then p.WorldPivot = encode(piv) end
@@ -2157,6 +2162,7 @@ local function applyRemoteRecords(remote, force)
 	end
 
 	-- 1. Instantiate missing objects
+	local created = {}
 	local prepared = 0
 	checkYield("Preparing objects", prepared, objectCount)
 	for key, r in pairs(changed) do
@@ -2172,6 +2178,7 @@ local function applyRemoteRecords(remote, force)
 				objects[key] = obj
 				ids[obj] = key
 				watchObject(obj, key)
+				created[key] = true
 				pending[key] = nil
 				warnings[key..":create"] = nil
 			else
@@ -2278,9 +2285,11 @@ local function applyRemoteRecords(remote, force)
 				local partLink = (name == "Part0" or name == "Part1")
 					and (obj:IsA("JointInstance") or obj:IsA("WeldConstraint"))
 				local attachmentLink = (name == "Attachment0" or name == "Attachment1") and obj:IsA("Constraint")
-				if force and (partLink or attachmentLink) then
+				local alias = obj:IsA("BasePart") and v.props.CFrame
+					and (name == "Position" or name == "Orientation" or name == "Rotation")
+				if (force or created[key]) and (partLink or attachmentLink) then
 					table.insert(deferredLinks, {obj = obj, key = key, name = name, value = value})
-				elseif not (obj:IsA("MeshPart") and (name == "MeshId" or name == "MeshContent" or name == "CollisionFidelity" or name == "RenderFidelity" or name == "FluidFidelity")) then
+				elseif not alias and not (obj:IsA("MeshPart") and (name == "MeshId" or name == "MeshContent" or name == "CollisionFidelity" or name == "RenderFidelity" or name == "FluidFidelity")) then
 					table.insert(values, {name, value})
 				end
 			end
@@ -2318,7 +2327,7 @@ local function applyRemoteRecords(remote, force)
 						end
 					elseif obj:IsA("BasePart") and name == "CFrame" then
 						local cf = decode(value)
-						if typeof(cf) == "CFrame" and not equal(encode(obj.CFrame), value) then
+						if typeof(cf) == "CFrame" and obj.CFrame ~= cf then
 							obj.CFrame = cf
 						end
 					elseif not equal(encode(obj[name]), value) then
@@ -2434,7 +2443,17 @@ local function applyRemoteRecords(remote, force)
 		dirtyKeys[key] = nil
 		if force and isSceneRecord(key, r) then
 			finalized += 1
-			if pending[key] or meshRetry[key] or referenceRetry[key] or appearanceRetry[key]
+			local obj = objects[key]
+			local expected = r.value.props and r.value.props.CFrame
+			local positionMismatch = obj and obj:IsA("BasePart") and expected
+				and not equal(encode(obj.CFrame), expected)
+			local warningKey = key..":placement"
+			if positionMismatch then
+				recordWarning(warningKey, r.value.name..": position differs from the room after import")
+			else
+				warnings[warningKey] = nil
+			end
+			if positionMismatch or pending[key] or meshRetry[key] or referenceRetry[key] or appearanceRetry[key]
 				or not isValidInHierarchy(objects[key], key) then
 				incomplete += 1
 			end
