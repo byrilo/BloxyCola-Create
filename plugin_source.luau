@@ -1313,7 +1313,7 @@ pcall(function()
 	end)
 end)
 
-local function queueTerrain(x, y, z)
+function terrainTracking.queue(x, y, z)
 	-- Terrain.MaxExtents spans [-128000, 128000] studs on each axis.
 	if math.max(x, y, z) >= 128000 or math.min(x, y, z) < -128000 then return end
 	local key = terrainKey(x, y, z)
@@ -1337,7 +1337,7 @@ local function terrainRecords()
 				local x = cx + (i % 3 - 1) * CHUNK
 				local y = cy + (math.floor(i / 3) % 3 - 1) * CHUNK
 				local z = cz + (math.floor(i / 9) - 1) * CHUNK
-				queueTerrain(x, y, z)
+				terrainTracking.queue(x, y, z)
 			end
 			terrainTracking.scanIndex = (scanIndex + 4) % 27
 			for x = cx - radius, cx + radius, CHUNK do
@@ -1345,7 +1345,7 @@ local function terrainRecords()
 					for z = cz - radius, cz + radius, CHUNK do
 						local key = terrainKey(x, y, z)
 						if not terrainScanned[key] then
-							queueTerrain(x, y, z)
+							terrainTracking.queue(x, y, z)
 							added += 1
 							if added >= 6 then return end
 						end
@@ -1380,7 +1380,7 @@ local function terrainRecords()
 				{x, y, z - CHUNK}, {x, y, z + CHUNK},
 			}) do
 				if not terrainScanned[terrainKey(table.unpack(neighbor))] then
-					queueTerrain(table.unpack(neighbor))
+					terrainTracking.queue(table.unpack(neighbor))
 				end
 			end
 		end
@@ -3356,16 +3356,15 @@ local function refreshSavesAndBackupsUI()
 	end)
 end
 
-local unreadChatCount = 0
-local roomChat = {seen = {}, recentIds = {}, cursor = ""}
+local roomChat = {seen = {}, recentIds = {}, cursor = "", unread = 0}
 local followingPeerId = nil
 local localActivePing = nil
 
 local function updateChatTabBadge()
 	local b = tabButtons["chat"]
 	if b then
-		if unreadChatCount > 0 then
-			b.Text = "Chat ("..unreadChatCount..")"
+		if roomChat.unread > 0 then
+			b.Text = "Chat ("..roomChat.unread..")"
 		else
 			b.Text = "Chat"
 		end
@@ -3440,7 +3439,7 @@ local function appendChatMessage(msg)
 	end)
 
 	if msg.from ~= selfNick.Text and uiTab ~= "chat" then
-		unreadChatCount += 1
+		roomChat.unread += 1
 		updateChatTabBadge()
 		playNotificationSound()
 	end
@@ -3455,7 +3454,7 @@ function roomChat.select(roomId, server)
 	for _, child in ipairs(chatMessagesFrame:GetChildren()) do
 		if child:IsA("Frame") then child:Destroy() end
 	end
-	unreadChatCount = 0
+	roomChat.unread = 0
 	updateChatTabBadge()
 end
 
@@ -3648,7 +3647,7 @@ for key, b in pairs(tabButtons) do
 		if key == "saves" then
 			refreshSavesAndBackupsUI()
 		elseif key == "chat" then
-			unreadChatCount = 0
+			roomChat.unread = 0
 			updateChatTabBadge()
 		end
 	end)
