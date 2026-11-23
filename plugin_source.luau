@@ -3248,7 +3248,6 @@ local function refreshSavesAndBackupsUI()
 end
 
 local unreadChatCount = 0
-local lastChatId = ""
 local followingPeerId = nil
 local localActivePing = nil
 
@@ -3346,12 +3345,13 @@ local function sendChatMessage()
 		return
 	end
 	chatInput.Text = ""
+	local roomId, server = room.Text, base()
 	task.spawn(function()
 		local ok, res = pcall(function()
-			return api("/rooms/"..room.Text.."/chat", "POST", {text = trimmed})
+			return api("/rooms/"..roomId.."/chat", "POST", {text = trimmed})
 		end)
-		if ok and res and res.message then
-			appendChatMessage(res.message)
+		if active and room.Text == roomId and base() == server and (not ok or not res or not res.message) then
+			setNotice("Could not send the chat message.")
 		end
 	end)
 end
@@ -3564,17 +3564,35 @@ playtestCard.clear.Activated:Connect(function() playtestCard.updateInvitation(""
 
 -- Chat background polling loop
 task.spawn(function()
+	local chatRoom, chatServer
+	local lastChatId = ""
+	local seen = {}
+	local recentIds = {}
 	while true do
 		if active and loggedIn and not inPlaytest() and room.Text ~= "" then
 			pcall(function()
 				local roomId, server = room.Text, base()
+				if chatRoom ~= roomId or chatServer ~= server then
+					chatRoom, chatServer = roomId, server
+					lastChatId = ""
+					table.clear(seen)
+					table.clear(recentIds)
+					clearContainerChildren(chatMessagesFrame)
+					unreadChatCount = 0
+					updateChatTabBadge()
+				end
 				local res = api("/rooms/"..roomId.."/chat"..(lastChatId ~= "" and ("?since="..lastChatId) or ""), "GET")
 				if not active or room.Text ~= roomId or base() ~= server then return end
 				playtestCard.showInvitation(res.playtest)
 				if res and res.messages then
 					for _, msg in ipairs(res.messages) do
 						lastChatId = msg.id
-						appendChatMessage(msg)
+						if not seen[msg.id] then
+							seen[msg.id] = true
+							table.insert(recentIds, msg.id)
+							if #recentIds > 200 then seen[table.remove(recentIds, 1)] = nil end
+							appendChatMessage(msg)
+						end
 					end
 				end
 			end)
